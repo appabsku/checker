@@ -1,0 +1,744 @@
+
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Rekonsiliasi Mutasi Pinjaman — KSPPS Artha Bahana Syariah</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<style>
+  :root{
+    --paper:#F6F3EC;
+    --paper-raised:#FFFDF8;
+    --ink:#1C2A44;
+    --ink-soft:#4B5670;
+    --brass:#A9793E;
+    --brass-deep:#7C5A2E;
+    --rule:#D8D0BE;
+    --green:#00ff00;
+    --cyan:#00ffff;
+    --danger:#B23A2F;
+    --shadow: 0 1px 0 rgba(28,42,68,.06);
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background:var(--paper);
+    background-image:
+      linear-gradient(var(--rule) 1px, transparent 1px);
+    background-size: 100% 42px;
+    color:var(--ink);
+    font-family:'IBM Plex Sans', sans-serif;
+    padding: 28px 22px 80px;
+  }
+  .wrap{max-width:1180px;margin:0 auto;}
+
+  .masthead{
+    display:flex;
+    justify-content:space-between;
+    align-items:flex-end;
+    gap:20px;
+    border-bottom:3px double var(--ink);
+    padding-bottom:14px;
+    margin-bottom:26px;
+    flex-wrap:wrap;
+  }
+  .masthead h1{
+    font-family:'Fraunces', serif;
+    font-weight:600;
+    font-size:clamp(24px, 3.2vw, 34px);
+    margin:0 0 4px;
+    letter-spacing:-0.01em;
+  }
+  .masthead .sub{
+    font-size:13px;
+    color:var(--ink-soft);
+    letter-spacing:.04em;
+    text-transform:uppercase;
+  }
+  .masthead .period{
+    text-align:right;
+    font-family:'IBM Plex Mono', monospace;
+    font-size:12.5px;
+    color:var(--brass-deep);
+  }
+
+  .grid-top{
+    display:grid;
+    grid-template-columns: 1fr 1fr;
+    gap:18px;
+    margin-bottom:18px;
+  }
+  @media (max-width: 860px){ .grid-top{grid-template-columns:1fr;} }
+
+  .card{
+    background:var(--paper-raised);
+    border:1px solid var(--rule);
+    border-radius:3px;
+    box-shadow: var(--shadow);
+    padding:20px 22px;
+    position:relative;
+  }
+  .card .step-no{
+    position:absolute;
+    top:-13px; left:18px;
+    background:var(--ink);
+    color:var(--paper-raised);
+    font-family:'IBM Plex Mono',monospace;
+    font-size:11px;
+    padding:3px 9px;
+    border-radius:2px;
+    letter-spacing:.05em;
+  }
+  .card h2{
+    font-family:'Fraunces', serif;
+    font-size:18px;
+    font-weight:600;
+    margin:6px 0 4px;
+  }
+  .card p.hint{
+    font-size:12.5px;
+    color:var(--ink-soft);
+    margin:0 0 14px;
+    line-height:1.5;
+  }
+  label.field-label{
+    display:block;
+    font-size:11.5px;
+    text-transform:uppercase;
+    letter-spacing:.06em;
+    color:var(--brass-deep);
+    margin:12px 0 5px;
+    font-weight:600;
+  }
+  input[type=text], input[type=url], textarea, select{
+    width:100%;
+    font-family:'IBM Plex Mono', monospace;
+    font-size:12.5px;
+    border:1px solid var(--rule);
+    background:#fff;
+    padding:9px 10px;
+    border-radius:2px;
+    color:var(--ink);
+  }
+  textarea{min-height:90px; resize:vertical;}
+  input:focus, textarea:focus, select:focus{
+    outline:2px solid var(--brass);
+    outline-offset:1px;
+  }
+  .filedrop{
+    border:1.5px dashed var(--rule);
+    border-radius:3px;
+    padding:22px;
+    text-align:center;
+    cursor:pointer;
+    background:#fffef9;
+    transition: border-color .15s ease, background .15s ease;
+  }
+  .filedrop:hover, .filedrop.drag{
+    border-color:var(--brass);
+    background:#fbf4e6;
+  }
+  .filedrop input{display:none;}
+  .filedrop .fdicon{font-size:22px; display:block; margin-bottom:6px;}
+  .filedrop .fdname{
+    font-family:'IBM Plex Mono',monospace;
+    font-size:12px;
+    color:var(--brass-deep);
+    margin-top:8px;
+    word-break:break-all;
+  }
+
+  button{
+    font-family:'IBM Plex Sans', sans-serif;
+    font-weight:600;
+    font-size:13px;
+    border:1px solid var(--ink);
+    background:var(--ink);
+    color:#fff;
+    padding:10px 16px;
+    border-radius:2px;
+    cursor:pointer;
+    letter-spacing:.01em;
+  }
+  button:hover{background:#2b3a5a;}
+  button:disabled{
+    background:#cfc9b8; border-color:#cfc9b8; color:#7c7563; cursor:not-allowed;
+  }
+  button.ghost{
+    background:transparent; color:var(--ink);
+  }
+  button.ghost:hover{background:#efe9da;}
+  button.small{padding:6px 11px; font-size:12px;}
+
+  .status-line{
+    font-family:'IBM Plex Mono',monospace;
+    font-size:12px;
+    margin-top:10px;
+    min-height:16px;
+  }
+  .status-ok{color:#1F7A3D;}
+  .status-err{color:var(--danger);}
+  .status-wait{color:var(--ink-soft);}
+
+  .process-bar{
+    display:flex; align-items:center; justify-content:center; gap:14px;
+    margin:22px 0 30px;
+    padding: 18px;
+    border-top:1px solid var(--rule);
+    border-bottom:1px solid var(--rule);
+  }
+  .process-bar .big-btn{
+    font-family:'Fraunces', serif;
+    font-size:16px;
+    padding:13px 30px;
+  }
+
+  .summary{
+    display:grid;
+    grid-template-columns:repeat(4,1fr);
+    gap:14px;
+    margin-bottom:22px;
+  }
+  @media (max-width:760px){ .summary{grid-template-columns:repeat(2,1fr);} }
+  .stat{
+    background:var(--paper-raised);
+    border:1px solid var(--rule);
+    border-left:5px solid var(--ink);
+    padding:14px 16px;
+    border-radius:2px;
+  }
+  .stat.s-green{border-left-color:#00b300;}
+  .stat.s-cyan{border-left-color:#00b3b3;}
+  .stat.s-both{border-left-color:var(--brass);}
+  .stat.s-none{border-left-color:#b23a2f;}
+  .stat .n{font-family:'Fraunces',serif; font-size:26px; font-weight:600; line-height:1;}
+  .stat .l{font-size:11.5px; text-transform:uppercase; letter-spacing:.05em; color:var(--ink-soft); margin-top:4px;}
+
+  .legend{
+    display:flex; flex-wrap:wrap; gap:18px;
+    font-size:12px; color:var(--ink-soft);
+    margin-bottom:14px;
+    align-items:center;
+  }
+  .legend span{display:inline-flex; align-items:center; gap:6px;}
+  .swatch{width:13px;height:13px;border:1px solid rgba(0,0,0,.25); display:inline-block; border-radius:2px;}
+
+  .table-card{
+    background:var(--paper-raised);
+    border:1px solid var(--rule);
+    border-radius:3px;
+    overflow:hidden;
+  }
+  .table-scroll{overflow:auto; max-height:640px;}
+  table{
+    border-collapse:collapse;
+    width:100%;
+    font-size:12.5px;
+  }
+  thead th{
+    position:sticky; top:0;
+    background:var(--ink);
+    color:#fff;
+    text-align:left;
+    padding:10px 10px;
+    font-weight:600;
+    font-size:11px;
+    text-transform:uppercase;
+    letter-spacing:.04em;
+    white-space:nowrap;
+    z-index:2;
+  }
+  tbody td{
+    padding:8px 10px;
+    border-bottom:1px solid var(--rule);
+    white-space:nowrap;
+  }
+  tbody tr:hover td{ filter:brightness(0.97); }
+  td.num, th.num{ font-family:'IBM Plex Mono',monospace; text-align:right; }
+  td.nama{font-weight:600; white-space:normal; min-width:180px;}
+  .row-green td{ background:var(--green); }
+  .row-cyan td{ background:var(--cyan); }
+  .row-both td{ background: linear-gradient(90deg, var(--green) 0 50%, var(--cyan) 50% 100%); }
+  .row-none td{ background:transparent; }
+  .badge{
+    font-family:'IBM Plex Mono',monospace;
+    font-size:10.5px;
+    padding:2px 6px;
+    border-radius:2px;
+    border:1px solid rgba(0,0,0,.35);
+    background:rgba(255,255,255,.55);
+    margin-right:4px;
+    white-space:nowrap;
+  }
+
+  .foot-actions{
+    display:flex; justify-content:space-between; align-items:center;
+    margin-top:16px; flex-wrap:wrap; gap:10px;
+  }
+  .note{
+    font-size:11.5px; color:var(--ink-soft); max-width:640px; line-height:1.5;
+  }
+  .mapping-row{display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; margin-top:10px;}
+  @media (max-width:760px){ .mapping-row{grid-template-columns:1fr;} }
+  .mapping-row label{margin:0 0 5px;}
+
+  ::selection{background:var(--brass); color:#fff;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="masthead">
+    <div>
+      <h1>Rekonsiliasi Mutasi Pinjaman</h1>
+      <div class="sub">KSPPS "Artha Bahana Syariah" · Randublatung</div>
+    </div>
+    <div class="period">
+      Cocokkan Google Sheet ? PDF Laporan Mutasi<br>
+      Nama · Saldo&nbsp;Awal?Pokok · Pot.Basil?Basil
+    </div>
+  </div>
+
+  <div class="grid-top">
+    <div class="card">
+      <span class="step-no">LANGKAH 1</span>
+      <h2>Sumber — Google Sheet</h2>
+      <p class="hint">Tempel tautan spreadsheet (harus dibagikan "Siapa saja yang memiliki tautan"). Aplikasi akan mengambil sheet sesuai <em>gid</em> pada tautan (mis. sheet RANDUBLATUNG). <b>Catatan:</b> jika dibuka di dalam pratinjau chat, pengambilan otomatis bisa gagal karena batasan jaringan sandbox — unduh berkas ini dan buka langsung di browser agar pengambilan otomatis berfungsi, atau gunakan "Tempel CSV manual" (tidak ada batas jumlah baris).</p>
+
+      <label class="field-label">URL Google Sheet</label>
+      <input type="url" id="sheetUrl" value="https://docs.google.com/spreadsheets/d/1PuWW5nHlYHkMTLz2dcW2qP9mPgLboMTrhxQAB26oEAU/edit?gid=1158401401#gid=1158401401">
+
+      <div style="display:flex; gap:10px; margin-top:12px;">
+        <button id="btnFetchSheet">Ambil Data Sheet</button>
+        <button class="ghost small" id="btnManualCsv" type="button">Tempel CSV manual…</button>
+      </div>
+      <div class="status-line status-wait" id="sheetStatus">Menunggu tautan diproses.</div>
+
+      <div id="manualCsvBox" style="display:none;">
+        <label class="field-label">Tempel isi CSV (jika pengambilan otomatis gagal / sheet privat)</label>
+        <textarea id="manualCsvArea" placeholder="NAMA,SALDO AWAL,POT.BASIL&#10;SUNARSIH,210000,0&#10;..."></textarea>
+        <button class="small" style="margin-top:8px;" id="btnUseManualCsv">Gunakan CSV ini</button>
+      </div>
+
+      <div id="sheetMapping" style="display:none;">
+        <div class="mapping-row">
+          <div>
+            <label class="field-label">Kolom Nama</label>
+            <select id="mapNama"></select>
+          </div>
+          <div>
+            <label class="field-label">Kolom Saldo Awal</label>
+            <select id="mapSaldo"></select>
+          </div>
+          <div>
+            <label class="field-label">Kolom Pot.Basil</label>
+            <select id="mapBasil"></select>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <span class="step-no">LANGKAH 2</span>
+      <h2>Sumber — PDF Mutasi</h2>
+      <p class="hint">Unggah "Laporan Mutasi Harian Pinjaman" (PDF). Kolom <b>Pokok</b> akan dicocokkan dengan Saldo Awal, dan <b>Basil</b> dengan Pot.Basil.</p>
+
+      <label class="field-label">Berkas PDF</label>
+      <div class="filedrop" id="dropZone">
+        <input type="file" id="pdfInput" accept="application/pdf">
+        <span class="fdicon">?</span>
+        <span>Klik atau seret berkas PDF ke sini</span>
+        <div class="fdname" id="pdfFileName"></div>
+      </div>
+      <div class="status-line status-wait" id="pdfStatus">Menunggu berkas PDF.</div>
+    </div>
+  </div>
+
+  <div class="process-bar">
+    <button class="big-btn" id="btnProcess" disabled>Cocokkan Data ?</button>
+  </div>
+
+  <div id="resultsArea" style="display:none;">
+    <div class="summary" id="summaryStats"></div>
+
+    <div class="legend">
+      <span><span class="swatch" style="background:#00ff00"></span> Hijau — Nama &amp; Basil(PDF) cocok dengan Pot.Basil(Sheet)</span>
+      <span><span class="swatch" style="background:#00ffff"></span> Sian — Nama &amp; Pokok(PDF) cocok dengan Saldo Awal(Sheet)</span>
+      <span><span class="swatch" style="background:linear-gradient(90deg,#00ff00,#00ffff)"></span> Kedua-duanya cocok</span>
+      <span><span class="swatch" style="background:#fff"></span> Tidak ada kecocokan</span>
+    </div>
+
+    <div class="table-card">
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Nama (Sheet)</th>
+              <th class="num">Saldo Awal</th>
+              <th class="num">Pot.Basil</th>
+              <th>Nama (PDF cocok)</th>
+              <th class="num">Pokok (PDF)</th>
+              <th class="num">Basil (PDF)</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="resultBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="foot-actions">
+      <div class="note">Toleransi selisih pencocokan angka: Rp&nbsp;1. Nama dicocokkan tanpa memandang huruf besar/kecil dan spasi berlebih, termasuk pencocokan sebagian untuk nama yang terpotong di PDF.</div>
+      <button class="ghost" id="btnExport">Unduh Hasil (CSV)</button>
+    </div>
+  </div>
+
+</div>
+
+<script>
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+// Catatan: jika worker gagal dimuat di sandbox pratinjau, pdf.js otomatis jatuh ke "fake worker"
+// (jalan di thread utama) dan mencetak peringatan di konsol — ini tidak fatal, PDF tetap terbaca.
+
+let sheetRows = null;      // [{nama, saldoAwal, potBasil}]
+let sheetHeaders = null;
+let sheetRaw = null;       // raw parsed csv rows+headers for remapping
+let pdfAgg = null;         // Map normName -> {displayName, pokok, basil}
+
+// ---------- helpers ----------
+function normName(s){
+  return (s||'').toString().toUpperCase().replace(/[^A-Z0-9 ]/g,' ').replace(/\s+/g,' ').trim();
+}
+function parseIndoNumber(s){
+  if (s === null || s === undefined) return NaN;
+  s = s.toString().trim();
+  if (s === '') return NaN;
+  s = s.replace(/[^\d.,-]/g,'');
+  if (s.indexOf(',') !== -1 && s.indexOf('.') !== -1) {
+    s = s.replace(/\./g,'').replace(',', '.');
+  } else if (s.indexOf(',') !== -1) {
+    s = s.replace(',', '.');
+  }
+  const n = parseFloat(s);
+  return isNaN(n) ? NaN : n;
+}
+function fmtIDR(n){
+  if (n === null || n === undefined || isNaN(n)) return '—';
+  return new Intl.NumberFormat('id-ID', {minimumFractionDigits:0, maximumFractionDigits:0}).format(Math.round(n));
+}
+
+function setStatus(el, text, kind){
+  el.textContent = text;
+  el.className = 'status-line ' + (kind ? 'status-'+kind : 'status-wait');
+}
+
+// ---------- Sheet loading ----------
+document.getElementById('btnManualCsv').addEventListener('click', ()=>{
+  const box = document.getElementById('manualCsvBox');
+  box.style.display = box.style.display === 'none' ? 'block' : 'none';
+});
+
+function extractSheetIdAndGid(url){
+  const idMatch = url.match(/\/d\/([a-zA-Z0-9-_]+)/);
+  const gidMatch = url.match(/gid=(\d+)/);
+  return {
+    id: idMatch ? idMatch[1] : null,
+    gid: gidMatch ? gidMatch[1] : '0'
+  };
+}
+
+document.getElementById('btnFetchSheet').addEventListener('click', async ()=>{
+  const statusEl = document.getElementById('sheetStatus');
+  const url = document.getElementById('sheetUrl').value.trim();
+  const { id, gid } = extractSheetIdAndGid(url);
+  if (!id){
+    setStatus(statusEl, 'Tautan tidak valid — tidak ditemukan ID spreadsheet.', 'err');
+    return;
+  }
+  const exportUrl = `https://docs.google.com/spreadsheets/d/${id}/export?format=csv&gid=${gid}`;
+  setStatus(statusEl, 'Mengambil data dari Google Sheet…', 'wait');
+  try{
+    const resp = await fetch(exportUrl);
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const text = await resp.text();
+    if (/^\s*<(!DOCTYPE|html)/i.test(text)){
+      throw new Error('Sheet tidak publik / butuh login.');
+    }
+    loadCsvText(text);
+    setStatus(statusEl, `Berhasil memuat ${sheetRows.length} baris dari sheet.`, 'ok');
+  } catch(err){
+    setStatus(statusEl, 'Gagal mengambil otomatis (' + err.message + '). Ini sering terjadi karena pratinjau di dalam chat membatasi akses jaringan keluar — coba unduh berkas HTML ini lalu buka langsung di browser (Chrome/Edge/Firefox), atau tempel CSV manual di bawah ini.', 'err');
+    document.getElementById('manualCsvBox').style.display = 'block';
+  }
+  checkReady();
+});
+
+document.getElementById('btnUseManualCsv').addEventListener('click', ()=>{
+  const statusEl = document.getElementById('sheetStatus');
+  const text = document.getElementById('manualCsvArea').value;
+  if (!text.trim()){
+    setStatus(statusEl, 'Kotak CSV masih kosong.', 'err');
+    return;
+  }
+  loadCsvText(text);
+  setStatus(statusEl, `Berhasil memuat ${sheetRows.length} baris dari CSV yang ditempel.`, 'ok');
+  checkReady();
+});
+
+function guessColumn(headers, patterns){
+  for (const pat of patterns){
+    const idx = headers.findIndex(h => pat.test(h.toUpperCase()));
+    if (idx !== -1) return idx;
+  }
+  return -1;
+}
+
+function loadCsvText(text){
+  const parsed = Papa.parse(text.trim(), { skipEmptyLines:true });
+  const rows = parsed.data;
+  if (!rows.length) { sheetRows = []; return; }
+  const headers = rows[0].map(h => (h||'').toString().trim());
+  sheetRaw = { headers, rows: rows.slice(1) };
+
+  const iNama = guessColumn(headers, [/^NAMA$/, /NAMA/]);
+  const iSaldo = guessColumn(headers, [/SALDO\s*AWAL/, /^SALDO$/, /SALDO/]);
+  const iBasil = guessColumn(headers, [/POT.*BASIL/, /BASIL/]);
+
+  populateMappingSelectors(headers, iNama, iSaldo, iBasil);
+  document.getElementById('sheetMapping').style.display = 'block';
+  buildSheetRowsFromMapping();
+}
+
+function populateMappingSelectors(headers, iNama, iSaldo, iBasil){
+  const mk = (sel, sel_idx) => {
+    sel.innerHTML = headers.map((h,i)=>`<option value="${i}">${h || '(kolom '+(i+1)+')'}</option>`).join('');
+    if (sel_idx >= 0) sel.value = sel_idx;
+  };
+  mk(document.getElementById('mapNama'), iNama);
+  mk(document.getElementById('mapSaldo'), iSaldo);
+  mk(document.getElementById('mapBasil'), iBasil);
+
+  ['mapNama','mapSaldo','mapBasil'].forEach(id=>{
+    document.getElementById(id).onchange = buildSheetRowsFromMapping;
+  });
+}
+
+function buildSheetRowsFromMapping(){
+  if (!sheetRaw) return;
+  const iNama = parseInt(document.getElementById('mapNama').value);
+  const iSaldo = parseInt(document.getElementById('mapSaldo').value);
+  const iBasil = parseInt(document.getElementById('mapBasil').value);
+  sheetRows = sheetRaw.rows
+    .map(r => ({
+      nama: (r[iNama]||'').toString().trim(),
+      saldoAwal: parseIndoNumber(r[iSaldo]),
+      potBasil: parseIndoNumber(r[iBasil])
+    }))
+    .filter(r => r.nama);
+  checkReady();
+}
+
+// ---------- PDF loading ----------
+const dropZone = document.getElementById('dropZone');
+const pdfInput = document.getElementById('pdfInput');
+dropZone.addEventListener('click', ()=> pdfInput.click());
+dropZone.addEventListener('dragover', e=>{ e.preventDefault(); dropZone.classList.add('drag'); });
+dropZone.addEventListener('dragleave', ()=> dropZone.classList.remove('drag'));
+dropZone.addEventListener('drop', e=>{
+  e.preventDefault(); dropZone.classList.remove('drag');
+  if (e.dataTransfer.files.length) handlePdfFile(e.dataTransfer.files[0]);
+});
+pdfInput.addEventListener('change', e=>{
+  if (e.target.files.length) handlePdfFile(e.target.files[0]);
+});
+
+async function handlePdfFile(file){
+  document.getElementById('pdfFileName').textContent = file.name;
+  const statusEl = document.getElementById('pdfStatus');
+  setStatus(statusEl, 'Membaca dan mengekstrak teks PDF…', 'wait');
+  try{
+    const buf = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({data: buf}).promise;
+    let allLines = [];
+    for (let p = 1; p <= pdf.numPages; p++){
+      const page = await pdf.getPage(p);
+      const content = await page.getTextContent();
+      allLines = allLines.concat(reconstructLines(content.items));
+    }
+    const parsedRows = parseMutasiLines(allLines);
+    pdfAgg = aggregateByName(parsedRows);
+    setStatus(statusEl, `Berhasil membaca ${parsedRows.length} baris mutasi, ${pdfAgg.size} nasabah unik.`, 'ok');
+  } catch(err){
+    setStatus(statusEl, 'Gagal membaca PDF: ' + err.message, 'err');
+  }
+  checkReady();
+}
+
+function reconstructLines(items){
+  const groups = {};
+  items.forEach(it=>{
+    const y = Math.round(it.transform[5]);
+    if (!groups[y]) groups[y] = [];
+    groups[y].push(it);
+  });
+  const ys = Object.keys(groups).map(Number).sort((a,b)=> b-a);
+  return ys.map(y=>{
+    const rowItems = groups[y].sort((a,b)=> a.transform[4]-b.transform[4]);
+    return rowItems.map(it=>it.str).join(' ').replace(/\s+/g,' ').trim();
+  }).filter(l=>l.length>0);
+}
+
+const MONEY_RE = /^\d{1,3}(\.\d{3})*,\d{2}$/;
+
+function parseMutasiLines(lines){
+  const out = [];
+  for (let raw of lines){
+    let line = raw.replace(/^_+/, '').trim();
+    const tokens = line.split(/\s+/);
+    if (tokens.length < 5) continue;
+    if (!/^\d+$/.test(tokens[0])) continue;
+    if (!/^[0-9A-Za-z]{2}-\d{5}$/.test(tokens[1])) continue;
+    if (!/^\d{2}-\d{2}-\d{4}$/.test(tokens[2])) continue;
+
+    const rest = tokens.slice(3);
+    let nameEnd = rest.findIndex(t => MONEY_RE.test(t));
+    if (nameEnd <= 0) continue;
+    const nama = rest.slice(0, nameEnd).join(' ');
+    const tail = rest.slice(nameEnd);
+
+    const moneyVals = [];
+    let ppjKe = null;
+    tail.forEach(t=>{
+      if (MONEY_RE.test(t)) moneyVals.push(parseIndoNumber(t));
+      else if (/^\d+$/.test(t)) ppjKe = parseInt(t,10);
+    });
+    if (!moneyVals.length) continue;
+
+    let pokok=0, basil=0, kifarat=0, pembiayaan=0;
+    if (ppjKe !== null){
+      pembiayaan = moneyVals[moneyVals.length-1];
+      const lead = moneyVals.slice(0, moneyVals.length-1);
+      pokok = lead[0] || 0;
+      basil = lead[1] || 0;
+      kifarat = lead[2] || 0;
+    } else {
+      pokok = moneyVals[0] || 0;
+    }
+    out.push({ no: tokens[0], nomor: tokens[1], tanggal: tokens[2], nama, pokok, basil, kifarat, ppjKe, pembiayaan });
+  }
+  return out;
+}
+
+function aggregateByName(rows){
+  const map = new Map();
+  rows.forEach(r=>{
+    const key = normName(r.nama);
+    if (!key) return;
+    if (!map.has(key)) map.set(key, { displayName: r.nama, pokok:0, basil:0 });
+    const entry = map.get(key);
+    entry.pokok += r.pokok;
+    entry.basil += r.basil;
+  });
+  return map;
+}
+
+// ---------- matching ----------
+function findPdfMatch(namaSheet){
+  const key = normName(namaSheet);
+  if (!key) return null;
+  if (pdfAgg.has(key)) return pdfAgg.get(key);
+  // partial match: pdf names sometimes truncated
+  let best = null;
+  for (const [k, v] of pdfAgg.entries()){
+    if (k === key) return v;
+    if (k.startsWith(key) || key.startsWith(k)){
+      if (!best || k.length > normName(best.displayName).length) best = v;
+    }
+  }
+  return best;
+}
+
+function checkReady(){
+  document.getElementById('btnProcess').disabled = !(sheetRows && sheetRows.length && pdfAgg && pdfAgg.size);
+}
+
+document.getElementById('btnProcess').addEventListener('click', ()=>{
+  const TOL = 1; // Rp
+  const results = sheetRows.map(row=>{
+    const match = findPdfMatch(row.nama);
+    let matchBasil = false, matchPokok = false;
+    if (match){
+      if (!isNaN(row.potBasil) && Math.abs(row.potBasil - match.basil) <= TOL) matchBasil = true;
+      if (!isNaN(row.saldoAwal) && Math.abs(row.saldoAwal - match.pokok) <= TOL) matchPokok = true;
+    }
+    return { row, match, matchBasil, matchPokok };
+  });
+  renderResults(results);
+});
+
+function renderResults(results){
+  const body = document.getElementById('resultBody');
+  body.innerHTML = '';
+  let cGreen=0, cCyan=0, cBoth=0, cNone=0;
+
+  results.forEach(({row, match, matchBasil, matchPokok})=>{
+    const tr = document.createElement('tr');
+    let cls = 'row-none';
+    let statusHtml = '<span class="badge">Tidak cocok</span>';
+    if (matchBasil && matchPokok){ cls='row-both'; cBoth++; statusHtml='<span class="badge">? Basil</span><span class="badge">? Pokok</span>'; }
+    else if (matchBasil){ cls='row-green'; cGreen++; statusHtml='<span class="badge">? Basil</span>'; }
+    else if (matchPokok){ cls='row-cyan'; cCyan++; statusHtml='<span class="badge">? Pokok</span>'; }
+    else { cNone++; }
+    tr.className = cls;
+    tr.innerHTML = `
+      <td class="nama">${row.nama}</td>
+      <td class="num">${fmtIDR(row.saldoAwal)}</td>
+      <td class="num">${fmtIDR(row.potBasil)}</td>
+      <td class="nama">${match ? match.displayName : '—'}</td>
+      <td class="num">${match ? fmtIDR(match.pokok) : '—'}</td>
+      <td class="num">${match ? fmtIDR(match.basil) : '—'}</td>
+      <td>${statusHtml}</td>
+    `;
+    body.appendChild(tr);
+  });
+
+  const summary = document.getElementById('summaryStats');
+  summary.innerHTML = `
+    <div class="stat s-green"><div class="n">${cGreen}</div><div class="l">Cocok Basil (Hijau)</div></div>
+    <div class="stat s-cyan"><div class="n">${cCyan}</div><div class="l">Cocok Pokok (Sian)</div></div>
+    <div class="stat s-both"><div class="n">${cBoth}</div><div class="l">Cocok Keduanya</div></div>
+    <div class="stat s-none"><div class="n">${cNone}</div><div class="l">Tidak Cocok</div></div>
+  `;
+
+  document.getElementById('resultsArea').style.display = 'block';
+  window._lastResults = results;
+}
+
+document.getElementById('btnExport').addEventListener('click', ()=>{
+  const results = window._lastResults || [];
+  const lines = [['NAMA_SHEET','SALDO_AWAL','POT_BASIL','NAMA_PDF','POKOK_PDF','BASIL_PDF','STATUS'].join(',')];
+  results.forEach(({row, match, matchBasil, matchPokok})=>{
+    let status = 'Tidak Cocok';
+    if (matchBasil && matchPokok) status = 'Cocok Keduanya';
+    else if (matchBasil) status = 'Cocok Basil';
+    else if (matchPokok) status = 'Cocok Pokok';
+    const esc = s => `"${(s||'').toString().replace(/"/g,'""')}"`;
+    lines.push([
+      esc(row.nama), row.saldoAwal||0, row.potBasil||0,
+      esc(match?match.displayName:''), match?match.pokok:'', match?match.basil:'',
+      esc(status)
+    ].join(','));
+  });
+  const blob = new Blob([lines.join('\n')], {type:'text/csv;charset=utf-8;'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'hasil_rekonsiliasi_mutasi.csv';
+  a.click();
+});
+</script>
+</body>
+</html>
