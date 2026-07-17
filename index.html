@@ -188,7 +188,10 @@
     if (data.rows && data.rows.length) {
       let table = '<table><tr><th>Nama</th><th>Baris</th><th>Pokok</th><th>Basil</th></tr>';
       data.rows.forEach(r => {
-        table += '<tr><td>' + escapeHtml(r.nama) + '</td><td>' + escapeHtml(r.row) + '</td><td>' +
+        const viaNote = r.matchedVia === '2kata'
+          ? ' <span style="color:#8a4b12; font-weight:600;" title="Dicocokkan lewat 2 kata pertama (nama di PDF kepotong)">(≈2 kata)</span>'
+          : '';
+        table += '<tr><td>' + escapeHtml(r.nama) + viaNote + '</td><td>' + escapeHtml(r.row) + '</td><td>' +
           (r.pokokMatch ? '✓' : '') + '</td><td>' + (r.basilMatch ? '✓' : '') + '</td></tr>';
       });
       table += '</table>';
