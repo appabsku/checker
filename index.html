@@ -99,6 +99,20 @@
     <button id="run" disabled>Proses & Cocokkan</button>
     <div id="status"></div>
   </div>
+
+  <div class="card">
+    <div style="font-size:14.5px; font-weight:600; margin-bottom:4px;">Link Spreadsheet Randublatung (bulan ini)</div>
+    <div class="hint" style="margin-bottom:10px;">
+      Ganti tiap bulan kalau spreadsheet Randublatung-nya pindah ke sheet baru — cukup paste link
+      dari address bar (boleh lengkap dengan <code>#gid=...</code>-nya), lalu klik Simpan.
+      Tidak perlu buka Apps Script atau deploy ulang.
+    </div>
+    <div id="linkKeduaCurrent" style="font-size:12.5px; color:var(--muted); margin-bottom:10px;">Memuat link yang sedang dipakai...</div>
+    <input type="text" id="linkKeduaInput" placeholder="https://docs.google.com/spreadsheets/d/.../edit?gid=..."
+      style="width:100%; padding:10px; border:1px solid var(--line); border-radius:8px; font-size:13px; box-sizing:border-box;">
+    <button id="saveLinkKedua" style="margin-top:10px;">Simpan Link Bulan Ini</button>
+    <div id="linkKeduaStatus" style="margin-top:10px; font-size:13px;"></div>
+  </div>
 </main>
 
 <script>
@@ -220,6 +234,54 @@
       statusEl.insertAdjacentHTML('beforeend', box);
     }
   }
+
+  // --- Link spreadsheet Randublatung bulan ini (ganti tanpa buka Apps Script) ---
+  const linkKeduaCurrentEl = document.getElementById('linkKeduaCurrent');
+  const linkKeduaInputEl = document.getElementById('linkKeduaInput');
+  const linkKeduaStatusEl = document.getElementById('linkKeduaStatus');
+  const saveLinkKeduaBtn = document.getElementById('saveLinkKedua');
+
+  async function callWebApp(payload) {
+    const res = await fetch(WEB_APP_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // hindari CORS preflight
+      body: JSON.stringify(payload)
+    });
+    return res.json();
+  }
+
+  async function loadLinkKedua() {
+    if (!WEB_APP_URL) { linkKeduaCurrentEl.textContent = 'WEB_APP_URL belum diisi.'; return; }
+    try {
+      const data = await callWebApp({ action: 'getLinkKedua' });
+      if (!data.ok) throw new Error(data.error || 'Gagal mengambil link.');
+      linkKeduaCurrentEl.innerHTML = 'Sedang dipakai: <a href="' + data.url + '" target="_blank" rel="noopener">' + data.url + '</a>';
+    } catch (err) {
+      linkKeduaCurrentEl.textContent = 'Gagal memuat link saat ini: ' + err.message;
+    }
+  }
+
+  saveLinkKeduaBtn.addEventListener('click', async () => {
+    const url = linkKeduaInputEl.value.trim();
+    if (!url) { linkKeduaStatusEl.textContent = 'Paste link spreadsheet-nya dulu.'; return; }
+    if (!WEB_APP_URL) { linkKeduaStatusEl.textContent = 'WEB_APP_URL belum diisi.'; return; }
+
+    saveLinkKeduaBtn.disabled = true;
+    linkKeduaStatusEl.textContent = 'Menyimpan...';
+    try {
+      const data = await callWebApp({ action: 'setLinkKedua', url: url });
+      if (!data.ok) throw new Error(data.error || 'Gagal menyimpan link.');
+      linkKeduaStatusEl.textContent = 'Tersimpan. Mulai sekarang pencocokan pakai spreadsheet ini.';
+      linkKeduaInputEl.value = '';
+      loadLinkKedua();
+    } catch (err) {
+      linkKeduaStatusEl.textContent = 'Gagal: ' + err.message;
+    } finally {
+      saveLinkKeduaBtn.disabled = false;
+    }
+  });
+
+  loadLinkKedua();
 </script>
 </body>
 </html>
