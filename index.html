@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="id">
 <head>
@@ -55,6 +54,21 @@
     border-radius:8px; padding:10px 12px; margin-bottom:18px;
   }
   code{background:#eef3f0; padding:1px 5px; border-radius:4px; font-size:11.5px;}
+
+  .warn-box{
+    margin-top:18px; border:1px solid #ecc6a6; background:#fdf3ea; border-radius:10px;
+    padding:12px 14px;
+  }
+  .warn-box h4{margin:0 0 6px; font-size:13.5px; color:#8a4b12;}
+  .warn-box p{margin:0 0 8px; font-size:12px; color:var(--muted);}
+  .warn-list{list-style:none; margin:0; padding:0; font-size:12.5px;}
+  .warn-list li{
+    padding:7px 0; border-top:1px solid #f1ddc7;
+  }
+  .warn-list li:first-child{border-top:none;}
+  .warn-name{font-weight:600; color:var(--ink);}
+  .warn-hint{display:block; margin-top:3px; color:#8a4b12; font-size:11.5px;}
+  .warn-hint.none{color:var(--muted);}
 </style>
 </head>
 <body>
@@ -157,6 +171,12 @@
     });
   }
 
+  function escapeHtml(str) {
+    return String(str)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
   function renderResult(data) {
     const s = data.summary;
     let text = 'Selesai.\n' +
@@ -168,11 +188,33 @@
     if (data.rows && data.rows.length) {
       let table = '<table><tr><th>Nama</th><th>Baris</th><th>Pokok</th><th>Basil</th></tr>';
       data.rows.forEach(r => {
-        table += '<tr><td>' + r.nama + '</td><td>' + r.row + '</td><td>' +
+        table += '<tr><td>' + escapeHtml(r.nama) + '</td><td>' + escapeHtml(r.row) + '</td><td>' +
           (r.pokokMatch ? '✓' : '') + '</td><td>' + (r.basilMatch ? '✓' : '') + '</td></tr>';
       });
       table += '</table>';
       statusEl.insertAdjacentHTML('beforeend', table);
+    }
+
+    // Nama dari PDF yang sama sekali tidak ketemu di kedua spreadsheet.
+    // Ini bukan error -- cuma penanda supaya baris yang "hilang" dari
+    // laporan di atas tidak diam-diam kelewat tanpa keterangan.
+    if (data.namaTidakKetemu && data.namaTidakKetemu.length) {
+      let box = '<div class="warn-box">' +
+        '<h4>⚠ ' + data.namaTidakKetemu.length + ' nama dari PDF tidak ketemu di spreadsheet mana pun</h4>' +
+        '<p>Biasanya karena nama di PDF kepotong (kolom lebar tetap) sehingga beda persis dari nama lengkap di spreadsheet, atau nasabahnya memang belum ada barisnya.</p>' +
+        '<ul class="warn-list">';
+      data.namaTidakKetemu.forEach(n => {
+        box += '<li><span class="warn-name">' + escapeHtml(n.nama) + '</span>';
+        if (n.kemungkinanTerpotong && n.kemungkinanNamaLengkap.length) {
+          box += '<span class="warn-hint">Kemungkinan nama lengkapnya di spreadsheet: ' +
+            n.kemungkinanNamaLengkap.map(escapeHtml).join(', ') + '</span>';
+        } else {
+          box += '<span class="warn-hint none">Tidak ada nama mirip yang ketemu di spreadsheet — cek manual.</span>';
+        }
+        box += '</li>';
+      });
+      box += '</ul></div>';
+      statusEl.insertAdjacentHTML('beforeend', box);
     }
   }
 </script>
