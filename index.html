@@ -207,6 +207,10 @@
           viaNote = ' <span style="color:#8a4b12; font-weight:600;" title="Dicocokkan lewat 2 kata pertama (nama di PDF kepotong)">(≈2 kata)</span>';
         } else if (r.matchedVia === '2kata+angka') {
           viaNote = ' <span style="color:#8a4b12; font-weight:600;" title="2 kata pertama cocok, dan dipastikan lewat Pokok+Basil karena ada beberapa nama mirip">(≈2 kata + angka)</span>';
+        } else if (r.matchedVia === 'prefix') {
+          viaNote = ' <span style="color:#8a4b12; font-weight:600;" title="Nama di sheet diawali persis oleh nama PDF yang kepotong di tengah kata">(≈potongan nama)</span>';
+        } else if (r.matchedVia === 'prefix+angka') {
+          viaNote = ' <span style="color:#8a4b12; font-weight:600;" title="Awalan nama cocok, dan dipastikan lewat Pokok+Basil karena ada beberapa nama mirip">(≈potongan nama + angka)</span>';
         }
         table += '<tr><td>' + escapeHtml(r.nama) + viaNote + '</td><td>' + escapeHtml(r.row) + '</td><td>' +
           (r.pokokMatch ? '✓' : '') + '</td><td>' + (r.basilMatch ? '✓' : '') + '</td></tr>';
