@@ -204,7 +204,6 @@
 
   if (WEB_APP_URL) configNote.style.display = 'none';
 
-  drop.addEventListener('click', () => fileInput.click());
   drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('drag'); });
   drop.addEventListener('dragleave', () => drop.classList.remove('drag'));
   drop.addEventListener('drop', e => {
