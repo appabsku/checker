@@ -173,9 +173,9 @@
   </div>
 
   <div class="card">
-    <div style="font-size:14.5px; font-weight:600; margin-bottom:4px;">Link Spreadsheet Randublatung (bulan ini)</div>
+    <div style="font-size:14.5px; font-weight:600; margin-bottom:4px;">Link Spreadsheet Kedua (bulan ini)</div>
     <div class="hint" style="margin-bottom:10px;">
-      Ganti tiap bulan kalau spreadsheet Randublatung-nya pindah ke sheet baru — cukup paste link
+      Ganti tiap bulan kalau spreadsheet-nya pindah ke sheet baru — cukup paste link
       dari address bar (boleh lengkap dengan <code>#gid=...</code>-nya), lalu klik Simpan.
       Tidak perlu buka Apps Script atau deploy ulang.
     </div>
@@ -267,7 +267,7 @@
     let text = 'Selesai.\n' +
       'Baris terbaca dari PDF: ' + s.pdfRowsRead + '\n' +
       'Baris cocok di spreadsheet utama: ' + s.mainSheetMatched + '\n' +
-      'Baris cocok di sheet Randublatung: ' + s.secondSheetMatched;
+      'Baris cocok di sheet kedua: ' + s.secondSheetMatched;
     statusEl.textContent = text;
 
     if (data.rows && data.rows.length) {
@@ -313,7 +313,7 @@
     }
   }
 
-  // --- Link spreadsheet Randublatung bulan ini (ganti tanpa buka Apps Script) ---
+  // --- Link spreadsheet kedua bulan ini (ganti tanpa buka Apps Script) ---
   const linkKeduaCurrentEl = document.getElementById('linkKeduaCurrent');
   const linkKeduaInputEl = document.getElementById('linkKeduaInput');
   const linkKeduaStatusEl = document.getElementById('linkKeduaStatus');
