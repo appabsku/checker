@@ -153,6 +153,17 @@
   .toggle-btn:hover:not(:disabled){transform:none; box-shadow:none; background:#e3e8ee;}
   .link-body{margin-top:14px;}
   .link-body.hidden{display:none;}
+
+  .sub-label{
+    font-size:13px; font-weight:700; color:var(--biru-tua); margin-bottom:6px;
+    display:flex; align-items:center; gap:6px;
+  }
+  .sub-badge{
+    font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.3px;
+    background:var(--abu-bg); color:var(--muted); border:1px solid var(--line);
+    border-radius:5px; padding:1px 6px;
+  }
+  .link-divider{margin:22px 0; border:none; border-top:1px dashed var(--line);}
 </style>
 </head>
 <body>
@@ -196,15 +207,27 @@
 
   <div class="card">
     <div class="card-head">
-      <div class="card-title">Link Cheker Nisbah</div>
+      <div class="card-title">GANTI LINK SHEET DI SINI DULU:</div>
       <button type="button" class="toggle-btn" id="toggleLink">Tampilkan</button>
     </div>
     <div class="link-body hidden" id="linkBody">
+
+      <div class="sub-label">Link Checker Nisbah</div>
+      <div id="linkUtamaCurrent" style="font-size:12.5px; color:var(--muted); margin-bottom:10px;">Memuat link yang sedang dipakai...</div>
+      <input type="text" id="linkUtamaInput" placeholder="https://docs.google.com/spreadsheets/d/.../edit?usp=sharing"
+        style="width:100%; padding:10px; border:1px solid var(--line); border-radius:8px; font-size:13px; box-sizing:border-box;">
+      <button id="saveLinkUtama" style="margin-top:10px;">Simpan Link Checker Nisbah</button>
+      <div id="linkUtamaStatus" style="margin-top:10px; font-size:13px;"></div>
+
+      <hr class="link-divider">
+
+      <div class="sub-label">Link Potensi Nisbah</div>
       <div id="linkKeduaCurrent" style="font-size:12.5px; color:var(--muted); margin-bottom:10px;">Memuat link yang sedang dipakai...</div>
       <input type="text" id="linkKeduaInput" placeholder="https://docs.google.com/spreadsheets/d/.../edit?usp=sharing"
         style="width:100%; padding:10px; border:1px solid var(--line); border-radius:8px; font-size:13px; box-sizing:border-box;">
-      <button id="saveLinkKedua" style="margin-top:10px;">Simpan Link Bulan Ini</button>
+      <button id="saveLinkKedua" style="margin-top:10px;">Simpan Link Potensi Nisbah</button>
       <div id="linkKeduaStatus" style="margin-top:10px; font-size:13px;"></div>
+
     </div>
   </div>
 </main>
@@ -336,7 +359,7 @@
     }
   }
 
-  // --- Show/hide kartu Link Cheker Nisbah, supaya halaman tidak kepanjangan ---
+  // --- Show/hide kartu pengaturan link, supaya halaman tidak kepanjangan ---
   const toggleLinkBtn = document.getElementById('toggleLink');
   const linkBodyEl = document.getElementById('linkBody');
   let linkLoaded = false;
@@ -346,15 +369,10 @@
     toggleLinkBtn.textContent = nowHidden ? 'Tampilkan' : 'Sembunyikan';
     if (!nowHidden && !linkLoaded) {
       linkLoaded = true;
+      loadLinkUtama();
       loadLinkKedua();
     }
   });
-
-  // --- Link spreadsheet Potensi Nisbah bulan ini (ganti tanpa buka Apps Script) ---
-  const linkKeduaCurrentEl = document.getElementById('linkKeduaCurrent');
-  const linkKeduaInputEl = document.getElementById('linkKeduaInput');
-  const linkKeduaStatusEl = document.getElementById('linkKeduaStatus');
-  const saveLinkKeduaBtn = document.getElementById('saveLinkKedua');
 
   async function callWebApp(payload) {
     const res = await fetch(WEB_APP_URL, {
@@ -365,17 +383,64 @@
     return res.json();
   }
 
+  function renderCurrentLink(el, url) {
+    el.innerHTML =
+      '<div style="margin-bottom:6px;">Sedang dipakai:</div>' +
+      '<div class="link-box">' +
+        '<span class="link-text" title="' + escapeHtml(url) + '">' + escapeHtml(url) + '</span>' +
+        '<a class="link-open" href="' + url + '" target="_blank" rel="noopener">Buka ↗</a>' +
+      '</div>';
+  }
+
+  // --- Link spreadsheet Checker Nisbah (utama) bulan/cabang ini ---
+  const linkUtamaCurrentEl = document.getElementById('linkUtamaCurrent');
+  const linkUtamaInputEl = document.getElementById('linkUtamaInput');
+  const linkUtamaStatusEl = document.getElementById('linkUtamaStatus');
+  const saveLinkUtamaBtn = document.getElementById('saveLinkUtama');
+
+  async function loadLinkUtama() {
+    if (!WEB_APP_URL) { linkUtamaCurrentEl.textContent = 'WEB_APP_URL belum diisi.'; return; }
+    try {
+      const data = await callWebApp({ action: 'getLinkUtama' });
+      if (!data.ok) throw new Error(data.error || 'Gagal mengambil link.');
+      renderCurrentLink(linkUtamaCurrentEl, data.url);
+    } catch (err) {
+      linkUtamaCurrentEl.textContent = 'Gagal memuat link saat ini: ' + err.message;
+    }
+  }
+
+  saveLinkUtamaBtn.addEventListener('click', async () => {
+    const url = linkUtamaInputEl.value.trim();
+    if (!url) { linkUtamaStatusEl.textContent = 'Paste link spreadsheet-nya dulu.'; return; }
+    if (!WEB_APP_URL) { linkUtamaStatusEl.textContent = 'WEB_APP_URL belum diisi.'; return; }
+
+    saveLinkUtamaBtn.disabled = true;
+    linkUtamaStatusEl.textContent = 'Menyimpan...';
+    try {
+      const data = await callWebApp({ action: 'setLinkUtama', url: url });
+      if (!data.ok) throw new Error(data.error || 'Gagal menyimpan link.');
+      linkUtamaStatusEl.textContent = 'Tersimpan. Mulai sekarang pencocokan pakai spreadsheet ini sebagai Checker Nisbah.';
+      linkUtamaInputEl.value = '';
+      loadLinkUtama();
+    } catch (err) {
+      linkUtamaStatusEl.textContent = 'Gagal: ' + err.message;
+    } finally {
+      saveLinkUtamaBtn.disabled = false;
+    }
+  });
+
+  // --- Link spreadsheet Potensi Nisbah bulan/cabang ini ---
+  const linkKeduaCurrentEl = document.getElementById('linkKeduaCurrent');
+  const linkKeduaInputEl = document.getElementById('linkKeduaInput');
+  const linkKeduaStatusEl = document.getElementById('linkKeduaStatus');
+  const saveLinkKeduaBtn = document.getElementById('saveLinkKedua');
+
   async function loadLinkKedua() {
     if (!WEB_APP_URL) { linkKeduaCurrentEl.textContent = 'WEB_APP_URL belum diisi.'; return; }
     try {
       const data = await callWebApp({ action: 'getLinkKedua' });
       if (!data.ok) throw new Error(data.error || 'Gagal mengambil link.');
-      linkKeduaCurrentEl.innerHTML =
-        '<div style="margin-bottom:6px;">Sedang dipakai:</div>' +
-        '<div class="link-box">' +
-          '<span class="link-text" title="' + data.url + '">' + data.url + '</span>' +
-          '<a class="link-open" href="' + data.url + '" target="_blank" rel="noopener">Buka ↗</a>' +
-        '</div>';
+      renderCurrentLink(linkKeduaCurrentEl, data.url);
     } catch (err) {
       linkKeduaCurrentEl.textContent = 'Gagal memuat link saat ini: ' + err.message;
     }
@@ -391,7 +456,7 @@
     try {
       const data = await callWebApp({ action: 'setLinkKedua', url: url });
       if (!data.ok) throw new Error(data.error || 'Gagal menyimpan link.');
-      linkKeduaStatusEl.textContent = 'Tersimpan. Mulai sekarang pencocokan pakai spreadsheet ini.';
+      linkKeduaStatusEl.textContent = 'Tersimpan. Mulai sekarang pencocokan pakai spreadsheet ini sebagai Potensi Nisbah.';
       linkKeduaInputEl.value = '';
       loadLinkKedua();
     } catch (err) {
