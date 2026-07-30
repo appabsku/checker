@@ -92,7 +92,7 @@
   .swatch{width:12px; height:12px; border-radius:3px; display:inline-block; margin-right:5px; vertical-align:-1px; border:1px solid rgba(0,0,0,.15);}
   #status{margin-top:16px; font-size:13.5px; white-space:pre-wrap; line-height:1.5;}
 
-  /* --- (1) tabel hasil dibuat scroll, header nempel di atas saat discroll --- */
+  /* tabel hasil dibuat scroll, header nempel di atas saat discroll */
   .table-wrap{
     max-height:360px; overflow-y:auto; margin-top:14px;
     border:1px solid var(--line); border-radius:8px;
@@ -100,6 +100,7 @@
   table{width:100%; border-collapse:collapse; font-size:12.5px;}
   th,td{border:1px solid var(--line); padding:6px 8px; text-align:left;}
   th{background:#eef5f1; position:sticky; top:0; z-index:1;}
+  td.col-no{width:44px; text-align:right; color:var(--muted);}
 
   .config-note{
     font-size:12px; color:var(--muted); background:#fbf6e8; border:1px solid #ecdca6;
@@ -125,7 +126,7 @@
   .link-box{
     display:flex; align-items:center; gap:10px; flex-wrap:wrap;
     background:#f5f8fb; border:1px solid var(--line); border-radius:8px;
-    padding:10px 12px; margin-bottom:8px;
+    padding:10px 12px; margin-bottom:10px;
   }
   .link-box .link-text{
     flex:1 1 auto; min-width:0;
@@ -139,21 +140,19 @@
     padding:5px 10px; text-decoration:none; white-space:nowrap;
   }
   .link-box .link-open:hover{background:#eef5ff;}
-  .link-box.empty{color:var(--muted); font-size:12px; background:transparent; border-style:dashed;}
 
-  /* --- (2) blok per cabang --- */
-  .branch-block{margin-bottom:16px; padding-bottom:16px; border-bottom:1px solid var(--line);}
-  .branch-block:last-child{border-bottom:none; margin-bottom:0; padding-bottom:0;}
-  .branch-title{font-weight:700; font-size:13.5px; margin-bottom:8px; color:var(--biru-tua);}
-  .branch-input{
-    width:100%; padding:9px 10px; border:1px solid var(--line); border-radius:8px;
-    font-size:12.5px; box-sizing:border-box; margin-top:2px;
+  /* header kartu link, dengan tombol show/hide di sebelah kanan */
+  .card-head{
+    display:flex; align-items:center; justify-content:space-between; gap:10px;
   }
-  .branch-save{
-    margin-top:8px; width:auto; padding:8px 16px; font-size:12.5px;
+  .card-head .card-title{font-size:14.5px; font-weight:600;}
+  .toggle-btn{
+    margin-top:0; width:auto; padding:7px 14px; font-size:12px; font-weight:700;
+    background:#eef1f5; color:var(--biru-tua); box-shadow:none; border:1px solid var(--line);
   }
-  .branch-save.saved{opacity:.6;}
-  .branch-status{font-size:11.5px; margin-top:6px; min-height:14px;}
+  .toggle-btn:hover:not(:disabled){transform:none; box-shadow:none; background:#e3e8ee;}
+  .link-body{margin-top:14px;}
+  .link-body.hidden{display:none;}
 </style>
 </head>
 <body>
@@ -195,13 +194,17 @@
   </div>
 
   <div class="card">
-    <div style="font-size:14.5px; font-weight:600; margin-bottom:4px;">Link Spreadsheet per Cabang (bulan ini)</div>
-    <div class="hint" style="margin-bottom:14px;">
-      Ganti tiap bulan kalau spreadsheet cabang pindah ke sheet baru — paste link dari address bar
-      (boleh lengkap dengan <code>#gid=...</code>-nya) di kolom cabang yang sesuai, lalu klik Simpan.
-      Tidak perlu buka Apps Script atau deploy ulang.
+    <div class="card-head">
+      <div class="card-title">Link Cheker Nisbah</div>
+      <button type="button" class="toggle-btn" id="toggleLink">Tampilkan</button>
     </div>
-    <div id="branchLinks">Memuat link yang sedang dipakai...</div>
+    <div class="link-body hidden" id="linkBody">
+      <div id="linkKeduaCurrent" style="font-size:12.5px; color:var(--muted); margin-bottom:10px;">Memuat link yang sedang dipakai...</div>
+      <input type="text" id="linkKeduaInput" placeholder="https://docs.google.com/spreadsheets/d/.../edit?usp=sharing"
+        style="width:100%; padding:10px; border:1px solid var(--line); border-radius:8px; font-size:13px; box-sizing:border-box;">
+      <button id="saveLinkKedua" style="margin-top:10px;">Simpan Link Bulan Ini</button>
+      <div id="linkKeduaStatus" style="margin-top:10px; font-size:13px;"></div>
+    </div>
   </div>
 </main>
 
@@ -211,18 +214,6 @@
   // https://script.google.com/macros/s/AKfycb.../exec
   // -------------------------------------------------------------------
   const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbwrUQRrQ0J3YdlxYdq3ECvg5j_Kd4erplvEIMZa6krQAyVF0p5pkVMK5LuOUoTrRLgi/exec";
-
-  // Daftar cabang. "url" di sini cuma nilai bawaan yang otomatis mengisi
-  // kolom input supaya tinggal klik Simpan — bukan link yang sudah tersimpan.
-  // Link yang BENAR-BENAR dipakai selalu diambil dari server (getLinkKedua).
-  const BRANCHES = [
-    { key: 'RANDU',   label: 'Randublatung', url: 'https://docs.google.com/spreadsheets/d/1uG51BxqICRe4uR9taldRSxiW7uWFPeyksNOzys8nL08/edit?gid=0#gid=0' },
-    { key: 'PWD',     label: 'PWD',          url: 'https://docs.google.com/spreadsheets/d/1uG51BxqICRe4uR9taldRSxiW7uWFPeyksNOzys8nL08/edit?gid=304946496#gid=304946496' },
-    { key: 'WIRO',    label: 'WIRO',         url: 'https://docs.google.com/spreadsheets/d/1uG51BxqICRe4uR9taldRSxiW7uWFPeyksNOzys8nL08/edit?gid=1256161390#gid=1256161390' },
-    { key: 'SRAGEN',  label: 'SRAGEN',       url: 'https://docs.google.com/spreadsheets/d/1uG51BxqICRe4uR9taldRSxiW7uWFPeyksNOzys8nL08/edit?gid=716270349#gid=716270349' },
-    { key: 'TANON',   label: 'TANON',        url: 'https://docs.google.com/spreadsheets/d/1uG51BxqICRe4uR9taldRSxiW7uWFPeyksNOzys8nL08/edit?gid=1208290972#gid=1208290972' },
-    { key: 'ANDONG',  label: 'ANDONG',       url: 'https://docs.google.com/spreadsheets/d/1uG51BxqICRe4uR9taldRSxiW7uWFPeyksNOzys8nL08/edit?gid=1729670674#gid=1729670674' }
-  ];
 
   const fileInput = document.getElementById('file');
   const drop = document.getElementById('drop');
@@ -234,7 +225,11 @@
 
   if (WEB_APP_URL) configNote.style.display = 'none';
 
-  drop.addEventListener('click', () => fileInput.click());
+  // CATATAN PERBAIKAN: "drop" adalah <label> yang membungkus <input type="file">,
+  // jadi klik di mana saja pada label ini SUDAH otomatis membuka dialog pilih
+  // file (perilaku bawaan HTML label+input). Sebelumnya ada juga
+  // fileInput.click() manual di sini -> dialog terbuka 2x. Listener klik
+  // manual itu dihapus, cukup drag & drop saja yang perlu ditangani lewat JS.
   drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('drag'); });
   drop.addEventListener('dragleave', () => drop.classList.remove('drag'));
   drop.addEventListener('drop', e => {
@@ -297,21 +292,19 @@
     const s = data.summary;
     let text = 'Selesai.\n' +
       'Baris terbaca dari PDF: ' + s.pdfRowsRead + '\n' +
-      'Baris cocok di spreadsheet utama (semua sheet): ' + s.mainSheetMatched + '\n' +
+      'Baris cocok di spreadsheet utama: ' + s.mainSheetMatched + '\n' +
       'Baris cocok di sheet kedua: ' + s.secondSheetMatched;
 
-    if (s.mainSheetsProcessed && s.mainSheetsProcessed.length) {
-      text += '\nSheet di spreadsheet utama yang diproses: ' + s.mainSheetsProcessed.join(', ');
-    }
-    if (s.mainSheetsSkipped && s.mainSheetsSkipped.length) {
-      text += '\nSheet dilewati (tidak ada header NAMA): ' + s.mainSheetsSkipped.join(', ');
+    if (s.processedSheets && s.processedSheets.length) {
+      text += '\nSheet yang diproses: ' + s.processedSheets.join(', ');
     }
     statusEl.textContent = text;
 
-    // (1) tabel hasil dibungkus div scroll, header ikut nempel (sticky) saat discroll
+    // Tabel hasil: kolom "Sheet" diganti nomor urut biasa, dibungkus div
+    // scroll supaya kartu status tidak terlalu panjang saat baris banyak.
     if (data.rows && data.rows.length) {
-      let table = '<div class="table-wrap"><table><thead><tr><th>Sheet</th><th>Nama</th><th>Baris</th><th>Pokok</th><th>Basil</th></tr></thead><tbody>';
-      data.rows.forEach(r => {
+      let table = '<div class="table-wrap"><table><thead><tr><th>No</th><th>Nama</th><th>Baris</th><th>Pokok</th><th>Basil</th></tr></thead><tbody>';
+      data.rows.forEach((r, idx) => {
         let viaNote = '';
         if (r.matchedVia === '2kata') {
           viaNote = ' <span style="color:#8a4b12; font-weight:600;" title="Dicocokkan lewat 2 kata pertama (nama di PDF kepotong)">(≈2 kata)</span>';
@@ -322,14 +315,14 @@
         } else if (r.matchedVia === 'prefix+angka') {
           viaNote = ' <span style="color:#8a4b12; font-weight:600;" title="Awalan nama cocok, dan dipastikan lewat Pokok+Basil karena ada beberapa nama mirip">(≈potongan nama + angka)</span>';
         }
-        table += '<tr><td>' + escapeHtml(r.sheet || '-') + '</td><td>' + escapeHtml(r.nama) + viaNote + '</td><td>' + escapeHtml(r.row) + '</td><td>' +
+        table += '<tr><td class="col-no">' + (idx + 1) + '</td><td>' + escapeHtml(r.nama) + viaNote + '</td><td>' + escapeHtml(r.row) + '</td><td>' +
           (r.pokokMatch ? '✓' : '') + '</td><td>' + (r.basilMatch ? '✓' : '') + '</td></tr>';
       });
       table += '</tbody></table></div>';
       statusEl.insertAdjacentHTML('beforeend', table);
     }
 
-    // Nama dari PDF yang sama sekali tidak ketemu di spreadsheet mana pun.
+    // Nama dari PDF yang sama sekali tidak ketemu di kedua spreadsheet.
     if (data.namaTidakKetemu && data.namaTidakKetemu.length) {
       let box = '<div class="warn-box">' +
         '<h4>⚠ ' + data.namaTidakKetemu.length + ' nama dari PDF tidak ketemu di spreadsheet mana pun</h4>' +
@@ -350,8 +343,25 @@
     }
   }
 
-  // --- (2) Link spreadsheet per cabang (ganti tanpa buka Apps Script) ---
-  const branchLinksEl = document.getElementById('branchLinks');
+  // --- Show/hide kartu Link Cheker Nisbah, supaya halaman tidak kepanjangan ---
+  const toggleLinkBtn = document.getElementById('toggleLink');
+  const linkBodyEl = document.getElementById('linkBody');
+  let linkLoaded = false;
+
+  toggleLinkBtn.addEventListener('click', () => {
+    const nowHidden = linkBodyEl.classList.toggle('hidden');
+    toggleLinkBtn.textContent = nowHidden ? 'Tampilkan' : 'Sembunyikan';
+    if (!nowHidden && !linkLoaded) {
+      linkLoaded = true;
+      loadLinkKedua();
+    }
+  });
+
+  // --- Link spreadsheet Potensi Nisbah bulan ini (ganti tanpa buka Apps Script) ---
+  const linkKeduaCurrentEl = document.getElementById('linkKeduaCurrent');
+  const linkKeduaInputEl = document.getElementById('linkKeduaInput');
+  const linkKeduaStatusEl = document.getElementById('linkKeduaStatus');
+  const saveLinkKeduaBtn = document.getElementById('saveLinkKedua');
 
   async function callWebApp(payload) {
     const res = await fetch(WEB_APP_URL, {
@@ -363,64 +373,43 @@
   }
 
   async function loadLinkKedua() {
-    if (!WEB_APP_URL) { branchLinksEl.textContent = 'WEB_APP_URL belum diisi.'; return; }
+    if (!WEB_APP_URL) { linkKeduaCurrentEl.textContent = 'WEB_APP_URL belum diisi.'; return; }
     try {
-      // Diasumsikan Apps Script mengembalikan { ok:true, links: { RANDU:"...", PWD:"...", ... } }
       const data = await callWebApp({ action: 'getLinkKedua' });
       if (!data.ok) throw new Error(data.error || 'Gagal mengambil link.');
-      renderBranchLinks(data.links || {});
+      linkKeduaCurrentEl.innerHTML =
+        '<div style="margin-bottom:6px;">Sedang dipakai:</div>' +
+        '<div class="link-box">' +
+          '<span class="link-text" title="' + data.url + '">' + data.url + '</span>' +
+          '<a class="link-open" href="' + data.url + '" target="_blank" rel="noopener">Buka ↗</a>' +
+        '</div>';
     } catch (err) {
-      branchLinksEl.textContent = 'Gagal memuat link saat ini: ' + err.message;
+      linkKeduaCurrentEl.textContent = 'Gagal memuat link saat ini: ' + err.message;
     }
   }
 
-  function renderBranchLinks(currentLinks) {
-    let html = '';
-    BRANCHES.forEach(b => {
-      const cur = currentLinks[b.key] || '';
-      html += '<div class="branch-block">' +
-        '<div class="branch-title">' + escapeHtml(b.label) + '</div>' +
-        (cur
-          ? '<div class="link-box"><span class="link-text" title="' + escapeHtml(cur) + '">' + escapeHtml(cur) + '</span>' +
-            '<a class="link-open" href="' + cur + '" target="_blank" rel="noopener">Buka ↗</a></div>'
-          : '<div class="link-box empty">Belum diisi.</div>') +
-        '<input type="text" class="branch-input" data-branch="' + b.key + '" ' +
-          'placeholder="https://docs.google.com/spreadsheets/d/.../edit?gid=..." value="' + escapeHtml(b.url) + '">' +
-        '<button class="branch-save" data-branch="' + b.key + '">Simpan ' + escapeHtml(b.label) + '</button>' +
-        '<div class="branch-status" data-branch-status="' + b.key + '"></div>' +
-        '</div>';
-    });
-    branchLinksEl.innerHTML = html;
+  saveLinkKeduaBtn.addEventListener('click', async () => {
+    const url = linkKeduaInputEl.value.trim();
+    if (!url) { linkKeduaStatusEl.textContent = 'Paste link spreadsheet-nya dulu.'; return; }
+    if (!WEB_APP_URL) { linkKeduaStatusEl.textContent = 'WEB_APP_URL belum diisi.'; return; }
 
-    branchLinksEl.querySelectorAll('.branch-save').forEach(btn => {
-      btn.addEventListener('click', () => saveBranchLink(btn.dataset.branch));
-    });
-  }
-
-  async function saveBranchLink(branchKey) {
-    const input = branchLinksEl.querySelector('.branch-input[data-branch="' + branchKey + '"]');
-    const btn = branchLinksEl.querySelector('.branch-save[data-branch="' + branchKey + '"]');
-    const statusSpan = branchLinksEl.querySelector('[data-branch-status="' + branchKey + '"]');
-    const url = input.value.trim();
-    if (!url) { statusSpan.textContent = 'Paste link spreadsheet-nya dulu.'; return; }
-    if (!WEB_APP_URL) { statusSpan.textContent = 'WEB_APP_URL belum diisi.'; return; }
-
-    btn.disabled = true;
-    statusSpan.textContent = 'Menyimpan...';
+    saveLinkKeduaBtn.disabled = true;
+    linkKeduaStatusEl.textContent = 'Menyimpan...';
     try {
-      // Diasumsikan Apps Script menerima { action:'setLinkKedua', branch:'RANDU', url:'...' }
-      const data = await callWebApp({ action: 'setLinkKedua', branch: branchKey, url: url });
+      const data = await callWebApp({ action: 'setLinkKedua', url: url });
       if (!data.ok) throw new Error(data.error || 'Gagal menyimpan link.');
-      statusSpan.textContent = 'Tersimpan.';
+      linkKeduaStatusEl.textContent = 'Tersimpan. Mulai sekarang pencocokan pakai spreadsheet ini.';
+      linkKeduaInputEl.value = '';
       loadLinkKedua();
     } catch (err) {
-      statusSpan.textContent = 'Gagal: ' + err.message;
+      linkKeduaStatusEl.textContent = 'Gagal: ' + err.message;
     } finally {
-      btn.disabled = false;
+      saveLinkKeduaBtn.disabled = false;
     }
-  }
+  });
 
-  loadLinkKedua();
+  // Link body sengaja disembunyikan default -- baru dimuat saat tombol
+  // "Tampilkan" pertama kali diklik (lihat listener toggleLinkBtn di atas).
 </script>
 </body>
 </html>
