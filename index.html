@@ -202,7 +202,7 @@
       <div id="linkCheckerCurrent" style="font-size:12.5px; color:var(--muted); margin-bottom:10px;">Memuat link yang sedang dipakai...</div>
       <input type="text" id="linkCheckerInput" placeholder="https://docs.google.com/spreadsheets/d/.../edit#gid=..."
         style="width:100%; padding:10px; border:1px solid var(--line); border-radius:8px; font-size:13px; box-sizing:border-box;">
-      <div style="font-size:11.5px; color:var(--muted); margin-top:6px;">Paste link spreadsheet Checker Nisbah dari address bar (boleh dengan atau tanpa <code>#gid=...</code>). Semua sheet/tab di dalamnya tetap otomatis dibaca.</div>
+      <div style="font-size:11.5px; color:var(--muted); margin-top:6px;">Buka tab/sheet yang dimaksud dulu di spreadsheet-nya, baru copy link dari address bar (harus ada <code>#gid=...</code>-nya). Hanya sheet dengan gid itu yang akan diproses & diwarnai.</div>
       <button id="saveLinkChecker" style="margin-top:10px;">Simpan Link Checker Nisbah</button>
       <div id="linkCheckerStatus" style="margin-top:10px; font-size:13px;"></div>
     </div>
@@ -217,7 +217,7 @@
       <div id="linkPotensiCurrent" style="font-size:12.5px; color:var(--muted); margin-bottom:10px;">Memuat link yang sedang dipakai...</div>
       <input type="text" id="linkPotensiInput" placeholder="https://docs.google.com/spreadsheets/d/.../edit#gid=..."
         style="width:100%; padding:10px; border:1px solid var(--line); border-radius:8px; font-size:13px; box-sizing:border-box;">
-      <div style="font-size:11.5px; color:var(--muted); margin-top:6px;">Paste link spreadsheet Potensi Nisbah bulan ini dari address bar (boleh dengan atau tanpa <code>#gid=...</code>). Semua sheet/tab cabang di dalamnya otomatis dibaca.</div>
+      <div style="font-size:11.5px; color:var(--muted); margin-top:6px;">Buka tab cabang yang dimaksud dulu di spreadsheet bulan ini, baru copy link dari address bar (harus ada <code>#gid=...</code>-nya). Hanya sheet cabang dengan gid itu yang akan diproses & diwarnai.</div>
       <button id="saveLinkPotensi" style="margin-top:10px;">Simpan Link Bulan Ini</button>
       <div id="linkPotensiStatus" style="margin-top:10px; font-size:13px;"></div>
     </div>
@@ -311,8 +311,11 @@
       'Baris cocok di spreadsheet utama: ' + s.mainSheetMatched + '\n' +
       'Baris cocok di sheet kedua: ' + s.secondSheetMatched;
 
-    if (s.processedSheets && s.processedSheets.length) {
-      text += '\nSheet yang diproses: ' + s.processedSheets.join(', ');
+    if (s.processedSheetsChecker && s.processedSheetsChecker.length) {
+      text += '\nSheet Checker Nisbah yang diproses: ' + s.processedSheetsChecker.join(', ');
+    }
+    if (s.processedSheetsPotensi && s.processedSheetsPotensi.length) {
+      text += '\nSheet Potensi Nisbah yang diproses: ' + s.processedSheetsPotensi.join(', ');
     }
     statusEl.textContent = text;
 
