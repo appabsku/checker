@@ -165,8 +165,8 @@
     </div>
   </div>
   <nav class="menu">
-    <a href="#" class="aktif">APK Checker</a>
-    <a href="https://appabsku.github.io/nisbahcek/">📊 ANALISA NISBAH</a>
+    <a href="https://appabsku.github.io/checker/" class="aktif">APK Checker</a>
+    <a href="https://appabsku.github.io/nisbah/">📊 ANALISA NISBAH</a>
     <a href="https://appabsku.github.io/datakol/">📑 Ekstrak 234</a>
   </nav>
 </header>
@@ -226,11 +226,6 @@
 
   if (WEB_APP_URL) configNote.style.display = 'none';
 
-  // CATATAN PERBAIKAN: "drop" adalah <label> yang membungkus <input type="file">,
-  // jadi klik di mana saja pada label ini SUDAH otomatis membuka dialog pilih
-  // file (perilaku bawaan HTML label+input). Sebelumnya ada juga
-  // fileInput.click() manual di sini -> dialog terbuka 2x. Listener klik
-  // manual itu dihapus, cukup drag & drop saja yang perlu ditangani lewat JS.
   drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('drag'); });
   drop.addEventListener('dragleave', () => drop.classList.remove('drag'));
   drop.addEventListener('drop', e => {
@@ -301,8 +296,6 @@
     }
     statusEl.textContent = text;
 
-    // Tabel hasil: kolom "Sheet" diganti nomor urut biasa, dibungkus div
-    // scroll supaya kartu status tidak terlalu panjang saat baris banyak.
     if (data.rows && data.rows.length) {
       let table = '<div class="table-wrap"><table><thead><tr><th>No</th><th>Nama</th><th>Baris</th><th>Pokok</th><th>Basil</th></tr></thead><tbody>';
       data.rows.forEach((r, idx) => {
@@ -323,7 +316,6 @@
       statusEl.insertAdjacentHTML('beforeend', table);
     }
 
-    // Nama dari PDF yang sama sekali tidak ketemu di kedua spreadsheet.
     if (data.namaTidakKetemu && data.namaTidakKetemu.length) {
       let box = '<div class="warn-box">' +
         '<h4>⚠ ' + data.namaTidakKetemu.length + ' nama dari PDF tidak ketemu di spreadsheet mana pun</h4>' +
@@ -408,9 +400,6 @@
       saveLinkKeduaBtn.disabled = false;
     }
   });
-
-  // Link body sengaja disembunyikan default -- baru dimuat saat tombol
-  // "Tampilkan" pertama kali diklik (lihat listener toggleLinkBtn di atas).
 </script>
 </body>
 </html>
