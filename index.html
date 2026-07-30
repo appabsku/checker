@@ -167,6 +167,7 @@
   <nav class="menu">
     <a href="#" class="aktif">APK Checker</a>
     <a href="https://appabsku.github.io/nisbahcek/">📊 ANALISA NISBAH</a>
+    <a href="https://appabsku.github.io/datakol/">📑 Ekstrak 234</a>
   </nav>
 </header>
 
@@ -195,31 +196,15 @@
 
   <div class="card">
     <div class="card-head">
-      <div class="card-title">Link Checker Nisbah <span style="font-weight:400; color:var(--muted);">(tetap, jarang ganti)</span></div>
-      <button type="button" class="toggle-btn" id="toggleLinkChecker">Tampilkan</button>
+      <div class="card-title">Link Cheker Nisbah</div>
+      <button type="button" class="toggle-btn" id="toggleLink">Tampilkan</button>
     </div>
-    <div class="link-body hidden" id="linkCheckerBody">
-      <div id="linkCheckerCurrent" style="font-size:12.5px; color:var(--muted); margin-bottom:10px;">Memuat link yang sedang dipakai...</div>
-      <input type="text" id="linkCheckerInput" placeholder="https://docs.google.com/spreadsheets/d/.../edit#gid=..."
+    <div class="link-body hidden" id="linkBody">
+      <div id="linkKeduaCurrent" style="font-size:12.5px; color:var(--muted); margin-bottom:10px;">Memuat link yang sedang dipakai...</div>
+      <input type="text" id="linkKeduaInput" placeholder="https://docs.google.com/spreadsheets/d/.../edit?usp=sharing"
         style="width:100%; padding:10px; border:1px solid var(--line); border-radius:8px; font-size:13px; box-sizing:border-box;">
-      <div style="font-size:11.5px; color:var(--muted); margin-top:6px;">Buka tab/sheet yang dimaksud dulu di spreadsheet-nya, baru copy link dari address bar (harus ada <code>#gid=...</code>-nya). Hanya sheet dengan gid itu yang akan diproses & diwarnai.</div>
-      <button id="saveLinkChecker" style="margin-top:10px;">Simpan Link Checker Nisbah</button>
-      <div id="linkCheckerStatus" style="margin-top:10px; font-size:13px;"></div>
-    </div>
-  </div>
-
-  <div class="card">
-    <div class="card-head">
-      <div class="card-title">Link Potensi Nisbah <span style="font-weight:400; color:var(--muted);">(ganti tiap bulan)</span></div>
-      <button type="button" class="toggle-btn" id="toggleLinkPotensi">Tampilkan</button>
-    </div>
-    <div class="link-body hidden" id="linkPotensiBody">
-      <div id="linkPotensiCurrent" style="font-size:12.5px; color:var(--muted); margin-bottom:10px;">Memuat link yang sedang dipakai...</div>
-      <input type="text" id="linkPotensiInput" placeholder="https://docs.google.com/spreadsheets/d/.../edit#gid=..."
-        style="width:100%; padding:10px; border:1px solid var(--line); border-radius:8px; font-size:13px; box-sizing:border-box;">
-      <div style="font-size:11.5px; color:var(--muted); margin-top:6px;">Buka tab cabang yang dimaksud dulu di spreadsheet bulan ini, baru copy link dari address bar (harus ada <code>#gid=...</code>-nya). Hanya sheet cabang dengan gid itu yang akan diproses & diwarnai.</div>
-      <button id="saveLinkPotensi" style="margin-top:10px;">Simpan Link Bulan Ini</button>
-      <div id="linkPotensiStatus" style="margin-top:10px; font-size:13px;"></div>
+      <button id="saveLinkKedua" style="margin-top:10px;">Simpan Link Bulan Ini</button>
+      <div id="linkKeduaStatus" style="margin-top:10px; font-size:13px;"></div>
     </div>
   </div>
 </main>
@@ -304,25 +289,15 @@
       .replace(/"/g, '&quot;');
   }
 
-  function formatAngka(v) {
-    if (v === null || v === undefined || v === '') return '-';
-    const n = Number(v);
-    if (isNaN(n)) return escapeHtml(String(v));
-    return n.toLocaleString('id-ID');
-  }
-
   function renderResult(data) {
     const s = data.summary;
     let text = 'Selesai.\n' +
       'Baris terbaca dari PDF: ' + s.pdfRowsRead + '\n' +
-      'Baris cocok di spreadsheet utama: ' + s.mainSheetMatched + '\n' +
-      'Baris cocok di sheet kedua: ' + s.secondSheetMatched;
+      'Baris cocok di spreadsheet utama (Checker Nisbah): ' + s.mainSheetMatched + '\n' +
+      'Baris cocok di sheet kedua (Potensi Nisbah, tetap diwarnai tapi tidak ditampilkan di tabel): ' + s.secondSheetMatched;
 
-    if (s.processedSheetsChecker && s.processedSheetsChecker.length) {
-      text += '\nSheet Checker Nisbah yang diproses: ' + s.processedSheetsChecker.join(', ');
-    }
-    if (s.processedSheetsPotensi && s.processedSheetsPotensi.length) {
-      text += '\nSheet Potensi Nisbah yang diproses: ' + s.processedSheetsPotensi.join(', ');
+    if (s.processedSheets && s.processedSheets.length) {
+      text += '\nSheet yang diproses: ' + s.processedSheets.join(', ');
     }
     statusEl.textContent = text;
 
@@ -367,26 +342,27 @@
       box += '</ul></div>';
       statusEl.insertAdjacentHTML('beforeend', box);
     }
-
-    // Nama yang PERSIS ketemu di spreadsheet, tapi angka Pokok/Basil dari
-    // PDF tidak ada yang cocok dengan Saldo Awal/Pot.Basil di baris itu --
-    // beda kasus dari "nama tidak ketemu" di atas, jadi dipisah supaya
-    // tidak membingungkan (nama-nya memang ADA, cuma angkanya beda).
-    if (data.namaAngkaTidakCocok && data.namaAngkaTidakCocok.length) {
-      let box2 = '<div class="warn-box">' +
-        '<h4>⚠ ' + data.namaAngkaTidakCocok.length + ' nama ketemu di spreadsheet, tapi angka Pokok/Basil dari PDF tidak cocok</h4>' +
-        '<p>Nama-nya sudah ada persis di baris spreadsheet, tapi tidak ada angka dari PDF (Pokok/Basil) yang cocok dengan Saldo Awal/Pot.Basil di baris itu — baris sengaja TIDAK diwarnai. Cek manual: bisa jadi datanya sudah berubah (lunas/dibayar sebagian) atau Saldo Awal/Pot.Basil di spreadsheet belum di-update.</p>' +
-        '<ul class="warn-list">';
-      data.namaAngkaTidakCocok.forEach(n => {
-        box2 += '<li><span class="warn-name">' + escapeHtml(n.nama) + '</span>' +
-          '<span class="warn-hint">Sheet: ' + escapeHtml(n.sheet) + ', baris ' + escapeHtml(n.row) +
-          ' — Saldo Awal: ' + formatAngka(n.saldoAwalSheet) + ', Pot.Basil: ' + formatAngka(n.potBasilSheet) +
-          ' | Angka di PDF: ' + n.pdfAmounts.map(formatAngka).join(', ') + '</span></li>';
-      });
-      box2 += '</ul></div>';
-      statusEl.insertAdjacentHTML('beforeend', box2);
-    }
   }
+
+  // --- Show/hide kartu Link Cheker Nisbah, supaya halaman tidak kepanjangan ---
+  const toggleLinkBtn = document.getElementById('toggleLink');
+  const linkBodyEl = document.getElementById('linkBody');
+  let linkLoaded = false;
+
+  toggleLinkBtn.addEventListener('click', () => {
+    const nowHidden = linkBodyEl.classList.toggle('hidden');
+    toggleLinkBtn.textContent = nowHidden ? 'Tampilkan' : 'Sembunyikan';
+    if (!nowHidden && !linkLoaded) {
+      linkLoaded = true;
+      loadLinkKedua();
+    }
+  });
+
+  // --- Link spreadsheet Potensi Nisbah bulan ini (ganti tanpa buka Apps Script) ---
+  const linkKeduaCurrentEl = document.getElementById('linkKeduaCurrent');
+  const linkKeduaInputEl = document.getElementById('linkKeduaInput');
+  const linkKeduaStatusEl = document.getElementById('linkKeduaStatus');
+  const saveLinkKeduaBtn = document.getElementById('saveLinkKedua');
 
   async function callWebApp(payload) {
     const res = await fetch(WEB_APP_URL, {
@@ -397,84 +373,44 @@
     return res.json();
   }
 
-  /**
-   * Setup generik untuk satu kartu link (dipakai untuk kartu Checker Nisbah
-   * maupun Potensi Nisbah) -- show/hide, muat link yang sedang dipakai, dan
-   * simpan link baru lewat action getLinkAction/setLinkAction ke Code.gs.
-   */
-  function setupLinkCard(cfg) {
-    const toggleBtn = document.getElementById(cfg.toggleId);
-    const bodyEl = document.getElementById(cfg.bodyId);
-    const currentEl = document.getElementById(cfg.currentId);
-    const inputEl = document.getElementById(cfg.inputId);
-    const statusEl2 = document.getElementById(cfg.statusId);
-    const saveBtn = document.getElementById(cfg.saveId);
-    let loaded = false;
-
-    async function loadCurrent() {
-      if (!WEB_APP_URL) { currentEl.textContent = 'WEB_APP_URL belum diisi.'; return; }
-      try {
-        const data = await callWebApp({ action: cfg.getAction });
-        if (!data.ok) throw new Error(data.error || 'Gagal mengambil link.');
-        currentEl.innerHTML =
-          '<div style="margin-bottom:6px;">Sedang dipakai:</div>' +
-          '<div class="link-box">' +
-            '<span class="link-text" title="' + data.url + '">' + data.url + '</span>' +
-            '<a class="link-open" href="' + data.url + '" target="_blank" rel="noopener">Buka ↗</a>' +
-          '</div>';
-      } catch (err) {
-        currentEl.textContent = 'Gagal memuat link saat ini: ' + err.message;
-      }
+  async function loadLinkKedua() {
+    if (!WEB_APP_URL) { linkKeduaCurrentEl.textContent = 'WEB_APP_URL belum diisi.'; return; }
+    try {
+      const data = await callWebApp({ action: 'getLinkKedua' });
+      if (!data.ok) throw new Error(data.error || 'Gagal mengambil link.');
+      linkKeduaCurrentEl.innerHTML =
+        '<div style="margin-bottom:6px;">Sedang dipakai:</div>' +
+        '<div class="link-box">' +
+          '<span class="link-text" title="' + data.url + '">' + data.url + '</span>' +
+          '<a class="link-open" href="' + data.url + '" target="_blank" rel="noopener">Buka ↗</a>' +
+        '</div>';
+    } catch (err) {
+      linkKeduaCurrentEl.textContent = 'Gagal memuat link saat ini: ' + err.message;
     }
-
-    toggleBtn.addEventListener('click', () => {
-      const nowHidden = bodyEl.classList.toggle('hidden');
-      toggleBtn.textContent = nowHidden ? 'Tampilkan' : 'Sembunyikan';
-      if (!nowHidden && !loaded) {
-        loaded = true;
-        loadCurrent();
-      }
-    });
-
-    saveBtn.addEventListener('click', async () => {
-      const url = inputEl.value.trim();
-      if (!url) { statusEl2.textContent = 'Paste link spreadsheet-nya dulu.'; return; }
-      if (!WEB_APP_URL) { statusEl2.textContent = 'WEB_APP_URL belum diisi.'; return; }
-
-      saveBtn.disabled = true;
-      statusEl2.textContent = 'Menyimpan...';
-      try {
-        const data = await callWebApp({ action: cfg.setAction, url: url });
-        if (!data.ok) throw new Error(data.error || 'Gagal menyimpan link.');
-        statusEl2.textContent = 'Tersimpan. Mulai sekarang pencocokan pakai spreadsheet ini.';
-        inputEl.value = '';
-        loadCurrent();
-      } catch (err) {
-        statusEl2.textContent = 'Gagal: ' + err.message;
-      } finally {
-        saveBtn.disabled = false;
-      }
-    });
   }
 
-  // --- Kartu Link Checker Nisbah (spreadsheet utama, gid tetap) ---
-  setupLinkCard({
-    toggleId: 'toggleLinkChecker', bodyId: 'linkCheckerBody',
-    currentId: 'linkCheckerCurrent', inputId: 'linkCheckerInput',
-    statusId: 'linkCheckerStatus', saveId: 'saveLinkChecker',
-    getAction: 'getLinkChecker', setAction: 'setLinkChecker'
+  saveLinkKeduaBtn.addEventListener('click', async () => {
+    const url = linkKeduaInputEl.value.trim();
+    if (!url) { linkKeduaStatusEl.textContent = 'Paste link spreadsheet-nya dulu.'; return; }
+    if (!WEB_APP_URL) { linkKeduaStatusEl.textContent = 'WEB_APP_URL belum diisi.'; return; }
+
+    saveLinkKeduaBtn.disabled = true;
+    linkKeduaStatusEl.textContent = 'Menyimpan...';
+    try {
+      const data = await callWebApp({ action: 'setLinkKedua', url: url });
+      if (!data.ok) throw new Error(data.error || 'Gagal menyimpan link.');
+      linkKeduaStatusEl.textContent = 'Tersimpan. Mulai sekarang pencocokan pakai spreadsheet ini.';
+      linkKeduaInputEl.value = '';
+      loadLinkKedua();
+    } catch (err) {
+      linkKeduaStatusEl.textContent = 'Gagal: ' + err.message;
+    } finally {
+      saveLinkKeduaBtn.disabled = false;
+    }
   });
 
-  // --- Kartu Link Potensi Nisbah (spreadsheet kedua, gid ganti tiap bulan) ---
-  setupLinkCard({
-    toggleId: 'toggleLinkPotensi', bodyId: 'linkPotensiBody',
-    currentId: 'linkPotensiCurrent', inputId: 'linkPotensiInput',
-    statusId: 'linkPotensiStatus', saveId: 'saveLinkPotensi',
-    getAction: 'getLinkPotensi', setAction: 'setLinkPotensi'
-  });
-
-  // Kedua link body sengaja disembunyikan default -- baru dimuat saat tombol
-  // "Tampilkan" pertama kali diklik (lihat setupLinkCard() di atas).
+  // Link body sengaja disembunyikan default -- baru dimuat saat tombol
+  // "Tampilkan" pertama kali diklik (lihat listener toggleLinkBtn di atas).
 </script>
 </body>
 </html>
