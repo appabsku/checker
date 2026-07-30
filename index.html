@@ -304,6 +304,13 @@
       .replace(/"/g, '&quot;');
   }
 
+  function formatAngka(v) {
+    if (v === null || v === undefined || v === '') return '-';
+    const n = Number(v);
+    if (isNaN(n)) return escapeHtml(String(v));
+    return n.toLocaleString('id-ID');
+  }
+
   function renderResult(data) {
     const s = data.summary;
     let text = 'Selesai.\n' +
@@ -359,6 +366,25 @@
       });
       box += '</ul></div>';
       statusEl.insertAdjacentHTML('beforeend', box);
+    }
+
+    // Nama yang PERSIS ketemu di spreadsheet, tapi angka Pokok/Basil dari
+    // PDF tidak ada yang cocok dengan Saldo Awal/Pot.Basil di baris itu --
+    // beda kasus dari "nama tidak ketemu" di atas, jadi dipisah supaya
+    // tidak membingungkan (nama-nya memang ADA, cuma angkanya beda).
+    if (data.namaAngkaTidakCocok && data.namaAngkaTidakCocok.length) {
+      let box2 = '<div class="warn-box">' +
+        '<h4>⚠ ' + data.namaAngkaTidakCocok.length + ' nama ketemu di spreadsheet, tapi angka Pokok/Basil dari PDF tidak cocok</h4>' +
+        '<p>Nama-nya sudah ada persis di baris spreadsheet, tapi tidak ada angka dari PDF (Pokok/Basil) yang cocok dengan Saldo Awal/Pot.Basil di baris itu — baris sengaja TIDAK diwarnai. Cek manual: bisa jadi datanya sudah berubah (lunas/dibayar sebagian) atau Saldo Awal/Pot.Basil di spreadsheet belum di-update.</p>' +
+        '<ul class="warn-list">';
+      data.namaAngkaTidakCocok.forEach(n => {
+        box2 += '<li><span class="warn-name">' + escapeHtml(n.nama) + '</span>' +
+          '<span class="warn-hint">Sheet: ' + escapeHtml(n.sheet) + ', baris ' + escapeHtml(n.row) +
+          ' — Saldo Awal: ' + formatAngka(n.saldoAwalSheet) + ', Pot.Basil: ' + formatAngka(n.potBasilSheet) +
+          ' | Angka di PDF: ' + n.pdfAmounts.map(formatAngka).join(', ') + '</span></li>';
+      });
+      box2 += '</ul></div>';
+      statusEl.insertAdjacentHTML('beforeend', box2);
     }
   }
 
