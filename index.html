@@ -314,10 +314,14 @@
       'Baris cocok di (Checker Nisbah): ' + s.mainSheetMatched + '\n' +
       'Baris cocok di (Potensi Nisbah): ' + s.secondSheetMatched;
 
-    const sheets = s.mainSheets || s.processedSheets;
-    if (sheets && sheets.length) {
-      text += '\nSheet yang diproses: ' + sheets.join(', ');
+    // Ambil daftar sheet
+    let sheets = s.mainSheets || s.processedSheets || [];
+    
+    // FILTER: Hanya ambil sheet pertama (karena sheet pertama milik Link Checker Nisbah)
+    if (sheets && sheets.length > 0) {
+      text += '\nSheet yang diproses: ' + sheets[0];
     }
+
     statusEl.textContent = text;
 
     if (data.rows && data.rows.length) {
