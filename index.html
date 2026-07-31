@@ -311,11 +311,12 @@
     const s = data.summary;
     let text = 'Selesai.\n' +
       'Baris terbaca dari PDF: ' + s.pdfRowsRead + '\n' +
-      'Baris cocok di spreadsheet utama (Checker Nisbah): ' + s.mainSheetMatched + '\n' +
-      'Baris cocok di sheet kedua (Potensi Nisbah, tetap diwarnai tapi tidak ditampilkan di tabel): ' + s.secondSheetMatched;
+      'Baris cocok di (Checker Nisbah): ' + s.mainSheetMatched + '\n' +
+      'Baris cocok di (Potensi Nisbah): ' + s.secondSheetMatched;
 
-    if (s.processedSheets && s.processedSheets.length) {
-      text += '\nSheet yang diproses: ' + s.processedSheets.join(', ');
+    const sheets = s.mainSheets || s.processedSheets;
+    if (sheets && sheets.length) {
+      text += '\nSheet yang diproses: ' + sheets.join(', ');
     }
     statusEl.textContent = text;
 
