@@ -164,6 +164,50 @@
     border-radius:5px; padding:1px 6px;
   }
   .link-divider{margin:22px 0; border:none; border-top:1px dashed var(--line);}
+
+  /* ---- Kalkulator AKP ---- */
+  .akp-grid{display:flex; gap:10px; margin:14px 0 4px; flex-wrap:wrap;}
+  .akp-field{flex:1; min-width:110px;}
+  .akp-field label{font-size:12px; color:var(--muted); display:block; margin-bottom:4px; font-weight:600;}
+  .akp-field select, .akp-field input[type="number"]{
+    width:100%; padding:9px 10px; border:1px solid var(--line); border-radius:8px; font-size:13.5px;
+  }
+  .akp-hari-box{
+    background:var(--abu-bg); border:1px solid var(--line); border-radius:8px;
+    padding:9px 10px; font-weight:800; color:var(--biru-tua); font-size:13.5px; text-align:center;
+  }
+  .akp-note{font-size:11.5px; color:var(--muted); margin:6px 0 16px; line-height:1.5;}
+  table.akp-table input{
+    width:100%; border:1px solid var(--line); border-radius:6px; padding:6px 7px; font-size:12.5px;
+    box-sizing:border-box;
+  }
+  table.akp-table input[type="number"], table.akp-table input.akp-saldo{text-align:right;}
+  /* hilangkan tombol scroll/spinner atas-bawah pada kolom angka */
+  table.akp-table input[type="number"]::-webkit-inner-spin-button,
+  table.akp-table input[type="number"]::-webkit-outer-spin-button{
+    -webkit-appearance:none; margin:0;
+  }
+  table.akp-table input[type="number"]{-moz-appearance:textfield;}
+  table.akp-table input.akp-locked{
+    background:var(--abu-bg); color:var(--ink); font-weight:700; cursor:default;
+    border-color:var(--line);
+  }
+  table.akp-table td.akp-hasil{text-align:right; font-weight:700; white-space:nowrap;}
+  .akp-hapus{
+    background:none; border:none; color:var(--merah); font-weight:800; cursor:pointer;
+    margin:0; padding:2px 6px; box-shadow:none; width:auto; font-size:14px;
+  }
+  #akpAddRow{
+    margin-top:10px; width:auto; padding:8px 16px; font-size:12.5px; font-weight:700;
+    background:#eef1f5; color:var(--biru-tua); box-shadow:none; border:1px solid var(--line);
+  }
+  #akpAddRow:hover{background:#e3e8ee; transform:none; box-shadow:none;}
+  .akp-total-box{
+    margin-top:18px; background:#fdf6e3; border:1px solid var(--emas); border-radius:10px;
+    padding:16px; text-align:center; display:none;
+  }
+  .akp-total-box .akp-total-label{font-size:12px; color:var(--muted); font-weight:700; letter-spacing:.3px;}
+  .akp-total-box .akp-total-value{font-size:24px; font-weight:800; color:var(--biru-tua); margin-top:4px;}
 </style>
 </head>
 <body>
@@ -176,13 +220,15 @@
     </div>
   </div>
   <nav class="menu">
-    <a href="https://appabsku.github.io/checker/" class="aktif">APK Checker</a>
+    <a href="#" class="aktif" data-tab="checker" onclick="showView('checker');return false;">APK Checker</a>
     <a href="https://appabsku.github.io/nisbah/">📊 ANALISA NISBAH</a>
     <a href="https://appabsku.github.io/datakol/">📑 Ekstrak 234</a>
+    <a href="#" data-tab="kalkulator" onclick="showView('kalkulator');return false;">🧮 KAL AKP</a>
   </nav>
 </header>
 
 <main>
+<div id="viewChecker">
   <div class="card">
     <div class="config-note" id="configNote">
       Web app belum dikonfigurasi. Isi <code>WEB_APP_URL</code> di bagian atas file ini
@@ -230,6 +276,56 @@
 
     </div>
   </div>
+</div>
+
+<div id="viewKalkulator" style="display:none;">
+  <div class="card">
+    <div class="card-head">
+      <div class="card-title">🧮 Kalkulator AKP (Akrual Bunga Bulanan)</div>
+    </div>
+
+    <div class="akp-grid">
+      <div class="akp-field">
+        <label>Bulan</label>
+        <select id="akpBulan"></select>
+      </div>
+      <div class="akp-field">
+        <label>Tahun</label>
+        <input type="number" id="akpTahun" step="1">
+      </div>
+      <div class="akp-field">
+        <label>Jml Hari 1 Bulan</label>
+        <div class="akp-hari-box" id="akpJmlHari">31</div>
+      </div>
+    </div>
+    <div class="akp-note">
+      Jumlah hari dihitung otomatis sesuai bulan &amp; tahun yang dipilih (Februari otomatis 28 atau 29 hari
+      tergantung tahun kabisat), dan ikut menentukan Nisbah % di bawah — makin banyak hari dalam sebulan,
+      makin besar Nisbah % dan Total AKP-nya (dan sebaliknya).
+      <br><br>
+      <strong>Cara hitung Total AKP:</strong> Nisbah % tiap kategori = rate harian tetap × jumlah hari bulan
+      berjalan. Hasil AKP = Saldo × Nisbah %. Total AKP = jumlah Hasil AKP dari semua kategori (REG + PEN +
+      UNIK). Kategori dan Nisbah % dipatenkan (tidak bisa diedit) — kolom yang bisa diisi hanya Saldo.
+    </div>
+
+    <div class="table-wrap" style="max-height:none;">
+      <table class="akp-table" id="akpTable">
+        <thead>
+          <tr><th style="width:26%;">Kategori</th><th style="width:32%;">Saldo</th><th style="width:16%;">Nisbah %</th><th style="width:20%;">Hasil AKP</th><th style="width:6%;"></th></tr>
+        </thead>
+        <tbody id="akpBody"></tbody>
+      </table>
+    </div>
+    <button type="button" id="akpAddRow">+ Tambah Baris</button>
+
+    <button type="button" id="akpHitung">Hitung Total AKP</button>
+
+    <div class="akp-total-box" id="akpTotalBox">
+      <div class="akp-total-label">TOTAL AKP</div>
+      <div class="akp-total-value" id="akpTotalValue">0</div>
+    </div>
+  </div>
+</div>
 </main>
 
 <script>
@@ -469,6 +565,145 @@
     } finally {
       saveLinkKeduaBtn.disabled = false;
     }
+  });
+
+  // ============================================================
+  // TAB VIEW: APK Checker <-> KAL AKP (tanpa pindah halaman)
+  // ============================================================
+  function showView(view) {
+    document.getElementById('viewChecker').style.display = (view === 'checker') ? '' : 'none';
+    document.getElementById('viewKalkulator').style.display = (view === 'kalkulator') ? '' : 'none';
+    document.querySelectorAll('nav.menu a[data-tab]').forEach(a => a.classList.remove('aktif'));
+    const activeLink = document.querySelector('nav.menu a[data-tab="' + view + '"]');
+    if (activeLink) activeLink.classList.add('aktif');
+    window.scrollTo({ top: 0, behavior: 'instant' in window ? 'instant' : 'auto' });
+  }
+
+  // ============================================================
+  // KALKULATOR AKP
+  // ============================================================
+  const bulanNamaAkp = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
+  const akpBulanEl = document.getElementById('akpBulan');
+  bulanNamaAkp.forEach((nama, idx) => {
+    const opt = document.createElement('option');
+    opt.value = idx;
+    opt.textContent = nama;
+    akpBulanEl.appendChild(opt);
+  });
+
+  const akpNow = new Date();
+  akpBulanEl.value = akpNow.getMonth();
+  const akpTahunEl = document.getElementById('akpTahun');
+  akpTahunEl.value = akpNow.getFullYear();
+  const akpJmlHariEl = document.getElementById('akpJmlHari');
+
+  // Jumlah hari akurat di bulan tsb (otomatis Feb 28/29 sesuai tahun kabisat),
+  // memakai trik "tanggal 0 bulan berikutnya" = hari terakhir bulan berjalan.
+  function hitungJumlahHariBulan(bulanIndex0, tahun) {
+    return new Date(tahun, bulanIndex0 + 1, 0).getDate();
+  }
+
+  function updateAkpJmlHari() {
+    const bulan = parseInt(akpBulanEl.value, 10);
+    const tahun = parseInt(akpTahunEl.value, 10) || akpNow.getFullYear();
+    const hari = hitungJumlahHariBulan(bulan, tahun);
+    akpJmlHariEl.textContent = hari;
+    refreshLockedNisbah();
+    return hari;
+  }
+  akpBulanEl.addEventListener('change', updateAkpJmlHari);
+  akpTahunEl.addEventListener('input', updateAkpJmlHari);
+  updateAkpJmlHari();
+
+  function formatAngkaID(num) {
+    return new Intl.NumberFormat('id-ID', { maximumFractionDigits: 0 }).format(Math.round(num));
+  }
+
+  const akpBodyEl = document.getElementById('akpBody');
+
+  // Rate harian tetap (hasil analisa: Nisbah 31-harian ÷ 31), dipakai untuk menghitung
+  // Nisbah % bulan berjalan = rate harian × jumlah hari bulan yang dipilih.
+  const AKP_DAILY_RATE = {
+    REG: 0.04184479457531179,
+    PEN: 0.023671232679383217,
+    UNIK: 0.0190684915835492
+  };
+
+  function formatRibuan(digitsStr) {
+    if (!digitsStr) return '';
+    return new Intl.NumberFormat('id-ID').format(parseInt(digitsStr, 10));
+  }
+
+  function attachSaldoFormatter(input) {
+    input.addEventListener('input', () => {
+      const digits = input.value.replace(/[^\d]/g, '');
+      input.value = formatRibuan(digits);
+    });
+  }
+
+  function addAkpRow(nama, saldo, bunga, locked, catKey) {
+    nama = nama || '';
+    saldo = (saldo === undefined) ? 0 : saldo;
+    bunga = (bunga === undefined) ? 0 : bunga;
+
+    const namaAttr = locked ? ' class="akp-nama akp-locked" readonly' : ' class="akp-nama"';
+    const catAttr = (locked && catKey) ? ' data-cat="' + catKey + '"' : '';
+    const bungaAttr = locked ? ' class="akp-bunga akp-locked" readonly' + catAttr : ' class="akp-bunga"';
+    const hapusCell = locked
+      ? '<td style="text-align:center;">-</td>'
+      : '<td style="text-align:center;"><button type="button" class="akp-hapus" title="Hapus baris">✕</button></td>';
+    const saldoDisplay = saldo ? formatRibuan(String(saldo)) : '';
+
+    const tr = document.createElement('tr');
+    tr.innerHTML =
+      '<td><input type="text"' + namaAttr + ' value="' + escapeHtml(nama) + '" placeholder="Kategori"></td>' +
+      '<td><input type="text" inputmode="numeric" class="akp-saldo" value="' + saldoDisplay + '" placeholder="0"></td>' +
+      '<td><input type="number"' + bungaAttr + ' value="' + bunga + '" step="any" placeholder="0"></td>' +
+      '<td class="akp-hasil">-</td>' +
+      hapusCell;
+    akpBodyEl.appendChild(tr);
+    attachSaldoFormatter(tr.querySelector('.akp-saldo'));
+    const hapusBtn = tr.querySelector('.akp-hapus');
+    if (hapusBtn) hapusBtn.addEventListener('click', () => tr.remove());
+  }
+
+  // Hitung ulang Nisbah % baris terkunci (REG/PEN/UNIK) = rate harian × jumlah hari
+  // bulan yang sedang dipilih, supaya Total AKP ikut berubah sesuai jumlah hari.
+  function refreshLockedNisbah() {
+    const hari = parseInt(akpJmlHariEl.textContent, 10) || 0;
+    document.querySelectorAll('.akp-bunga.akp-locked[data-cat]').forEach(el => {
+      const cat = el.getAttribute('data-cat');
+      const dailyRate = AKP_DAILY_RATE[cat];
+      if (dailyRate === undefined) return;
+      el.value = (dailyRate * hari).toFixed(5);
+    });
+  }
+
+  // Baris default mengikuti kategori & rate bulan berjalan (REG/PEN/UNIK).
+  // Kategori dan Nisbah % dipatenkan (readonly, tidak bisa diedit). Nisbah % dihitung
+  // otomatis = rate harian × jumlah hari bulan yang dipilih, sehingga Total AKP ikut
+  // berubah kalau bulan/tahun (jumlah hari) diganti. Hanya kolom Saldo yang bisa diisi
+  // manual. Kategori UMI dihapus permanen.
+  addAkpRow('REG', 0, 0, true, 'REG');
+  addAkpRow('PEN', 0, 0, true, 'PEN');
+  addAkpRow('UNIK', 0, 0, true, 'UNIK');
+  refreshLockedNisbah();
+
+  document.getElementById('akpAddRow').addEventListener('click', () => addAkpRow());
+
+  document.getElementById('akpHitung').addEventListener('click', () => {
+    const rows = akpBodyEl.querySelectorAll('tr');
+    let total = 0;
+    rows.forEach(tr => {
+      const saldoRaw = tr.querySelector('.akp-saldo').value.replace(/[^\d]/g, '');
+      const saldo = parseFloat(saldoRaw) || 0;
+      const bunga = parseFloat(tr.querySelector('.akp-bunga').value) || 0;
+      const hasil = saldo * (bunga / 100);
+      total += hasil;
+      tr.querySelector('.akp-hasil').textContent = formatAngkaID(hasil);
+    });
+    document.getElementById('akpTotalValue').textContent = formatAngkaID(total);
+    document.getElementById('akpTotalBox').style.display = 'block';
   });
 </script>
 </body>
