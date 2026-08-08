@@ -236,9 +236,9 @@
     </div>
 
     <label class="drop" id="drop">
-      <input type="file" id="file" accept="application/pdf">
-      <div><strong>Klik atau seret file PDF</strong> ke sini</div>
-      <div class="hint">Laporan Mutasi Harian Pinjaman (.pdf)</div>
+      <input type="file" id="file" accept=".pdf,application/pdf,.doc,.docx,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.xlsx,.xls,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,.csv,text/csv,image/*">
+      <div><strong>Klik atau seret file</strong> ke sini</div>
+      <div class="hint">Laporan Mutasi Harian Pinjaman — PDF, Word (.doc/.docx), Excel (.xlsx/.xls), CSV, atau foto/scan (JPG/PNG)</div>
       <div class="filename" id="filename"></div>
     </label>
 
@@ -366,7 +366,7 @@
       return;
     }
     runBtn.disabled = true;
-    statusEl.textContent = 'Membaca PDF...';
+    statusEl.textContent = 'Membaca file...';
 
     try {
       const base64 = await fileToBase64(selectedFile);
@@ -406,7 +406,7 @@
   function renderResult(data) {
     const s = data.summary;
     let text = 'Selesai.\n' +
-      'Baris terbaca dari PDF: ' + s.pdfRowsRead + '\n' +
+      'Baris terbaca dari file: ' + s.pdfRowsRead + '\n' +
       'Baris cocok di (Checker Nisbah): ' + s.mainSheetMatched + '\n' +
       'Baris cocok di (Potensi Nisbah): ' + s.secondSheetMatched;
 
@@ -442,8 +442,8 @@
 
     if (data.namaTidakKetemu && data.namaTidakKetemu.length) {
       let box = '<div class="warn-box">' +
-        '<h4>⚠ ' + data.namaTidakKetemu.length + ' nama dari PDF tidak ketemu di spreadsheet mana pun</h4>' +
-        '<p>Biasanya karena nama di PDF kepotong (kolom lebar tetap) sehingga beda persis dari nama lengkap di spreadsheet, atau nasabahnya memang belum ada barisnya.</p>' +
+        '<h4>⚠ ' + data.namaTidakKetemu.length + ' nama dari file tidak ketemu di spreadsheet mana pun</h4>' +
+        '<p>Biasanya karena nama di file kepotong (kolom lebar tetap) sehingga beda persis dari nama lengkap di spreadsheet, atau nasabahnya memang belum ada barisnya.</p>' +
         '<ul class="warn-list">';
       data.namaTidakKetemu.forEach(n => {
         box += '<li><span class="warn-name">' + escapeHtml(n.nama) + '</span>';
