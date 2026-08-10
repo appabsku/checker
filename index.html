@@ -4,6 +4,12 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>APK Checker — KSPPS Artha Bahana Syariah</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script>
+  if (window.pdfjsLib) {
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  }
+</script>
 <style>
   :root{
     --biru-tua:#003c71;
@@ -369,13 +375,41 @@
     statusEl.textContent = 'Membaca file...';
 
     try {
-      const base64 = await fileToBase64(selectedFile);
+      const ext = (selectedFile.name.split('.').pop() || '').toLowerCase();
+      let payload = null;
+
+      // PATCH 10-08-2026: untuk PDF, coba parse LANGSUNG DI BROWSER dulu
+      // (lewat pdf.js) -- ini menghindari konversi PDF->Google Docs di
+      // server yang terbukti bisa mengacak urutan teks untuk sebagian
+      // file. Kalau berhasil dapat baris, kirim hasil parse-nya saja
+      // (bukan file PDF-nya) ke server supaya server tinggal mencocokkan
+      // ke spreadsheet. Kalau gagal / 0 baris -> fallback ke cara lama
+      // (upload file ke server, server yang proses).
+      if (ext === 'pdf' && window.pdfjsLib) {
+        try {
+          statusEl.textContent = 'Membaca PDF di browser...';
+          const { rawText, records } = await extractPdfClientSide(selectedFile);
+          if (records.length > 0) {
+            payload = { fileName: selectedFile.name, clientRecords: records, rawText: rawText };
+          }
+        } catch (pdfErr) {
+          // biarkan payload tetap null -> jatuh ke fallback base64 di bawah
+          console.warn('Parsing PDF di browser gagal, fallback ke server:', pdfErr);
+        }
+      }
+
+      if (!payload) {
+        statusEl.textContent = 'Membaca file...';
+        const base64 = await fileToBase64(selectedFile);
+        payload = { fileName: selectedFile.name, base64: base64 };
+      }
+
       statusEl.textContent = 'Mengirim ke server & mencocokkan spreadsheet...';
 
       const res = await fetch(WEB_APP_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // hindari CORS preflight
-        body: JSON.stringify({ fileName: selectedFile.name, base64: base64 })
+        body: JSON.stringify(payload)
       });
       const data = await res.json();
 
@@ -705,6 +739,97 @@
     document.getElementById('akpTotalValue').textContent = formatAngkaID(total);
     document.getElementById('akpTotalBox').style.display = 'block';
   });
+
+  // ============================================================
+  // PATCH 10-08-2026: parsing PDF di BROWSER (bukan lewat server),
+  // supaya tidak lagi bergantung pada konversi PDF->Google Docs yang
+  // sudah terbukti mengacak-acak urutan teks untuk sebagian file.
+  // pdf.js (dari CDN) memberi posisi (x,y) tiap potongan teks, jadi baris
+  // bisa disusun ulang secara akurat: kelompokkan per koordinat Y
+  // (dengan toleransi kecil), lalu urutkan tiap baris berdasarkan X.
+  // Hasilnya teks per baris yang RAPI (No Nomor Tanggal Nama Pokok Basil
+  // ...), lalu diparse dengan parsePdfRowsClient() -- regex sederhana per
+  // baris karena urutannya sudah benar, tidak perlu lagi tebak-tebakan.
+  //
+  // Kalau karena sesuatu hal parsing di browser gagal / tidak dapat baris
+  // sama sekali (mis. PDF hasil scan tanpa teks asli, atau pdf.js gagal
+  // dimuat), otomatis FALLBACK ke jalur lama (upload base64, diproses di
+  // server lewat Apps Script) supaya tetap ada hasil.
+  // ============================================================
+
+  async function extractPdfClientSide(file) {
+    const arrayBuffer = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+    const allLines = [];
+
+    for (let p = 1; p <= pdf.numPages; p++) {
+      const page = await pdf.getPage(p);
+      const content = await page.getTextContent();
+
+      const items = content.items
+        .map(it => ({ text: it.str, x: it.transform[4], y: it.transform[5] }))
+        .filter(it => it.text && it.text.trim().length > 0);
+
+      // Urutkan dulu top->bottom (y besar ke kecil di sistem koordinat PDF), lalu kiri->kanan.
+      items.sort((a, b) => (b.y - a.y) || (a.x - b.x));
+
+      const Y_TOL = 3; // toleransi piksel PDF supaya teks di baris yang sama tidak kepisah
+      let currentLine = null;
+      const lines = [];
+      items.forEach(it => {
+        if (currentLine && Math.abs(currentLine.y - it.y) <= Y_TOL) {
+          currentLine.items.push(it);
+        } else {
+          currentLine = { y: it.y, items: [it] };
+          lines.push(currentLine);
+        }
+      });
+
+      lines.forEach(line => {
+        line.items.sort((a, b) => a.x - b.x);
+        const text = line.items.map(i => i.text).join(' ').replace(/\s+/g, ' ').trim();
+        if (text) allLines.push(text);
+      });
+    }
+
+    const rawText = allLines.join('\n');
+    const records = parsePdfRowsClient(rawText);
+    return { rawText, records };
+  }
+
+  /**
+   * Parser baris-per-baris untuk teks PDF yang SUDAH tersusun rapi (hasil
+   * extractPdfClientSide di atas). Formatnya konsisten:
+   *   No Nomor Tanggal Nama [Pokok] Basil [Kifarat] [Ppj] [Ke] [Pembiayaan]
+   * Karena urutannya sudah benar, cukup regex per baris -- tidak perlu
+   * algoritma eliminasi seperti fallback server.
+   */
+  function parsePdfRowsClient(rawText) {
+    const lines = rawText.split(/\n+/).map(l => l.trim()).filter(Boolean);
+    const rowRe = /^(\d+)\s+([\w.\/-]+)\s+(\d{2}-\d{2}-\d{4})\s+(.+)$/;
+    const moneyRe = /-?\d{1,3}(?:\.\d{3})*,\d{2}/g;
+    const records = [];
+
+    lines.forEach(line => {
+      const m = line.match(rowRe);
+      if (!m) return; // baris header/footer/total tidak diawali "No" -> otomatis dilewati
+
+      const rest = m[4];
+      const firstDigitIdx = rest.search(/\d/);
+      const nama = (firstDigitIdx > -1 ? rest.substring(0, firstDigitIdx) : rest)
+        .replace(/\s+/g, ' ').trim();
+      if (!nama) return;
+
+      const moneyMatches = rest.match(moneyRe) || [];
+      const amounts = moneyMatches
+        .map(s => parseFloat(s.replace(/\./g, '').replace(',', '.')))
+        .filter(v => !isNaN(v) && Math.abs(v) > 0.005);
+
+      records.push({ nama: nama.toUpperCase(), amounts: amounts });
+    });
+
+    return records;
+  }
 </script>
 </body>
 </html>
