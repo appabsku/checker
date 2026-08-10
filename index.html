@@ -916,9 +916,20 @@
     try {
       const { data } = await worker.recognize(file, {}, { text: true, tsv: true });
 
+      // DEBUG (sementara): supaya bisa didiagnosis dari DevTools Console
+      // browser (F12 -> tab Console) kalau hasil pencocokan masih meleset.
+      // Tidak mempengaruhi pemrosesan, cuma mencetak ke console.
+      console.log('=== [DEBUG OCR] data.text (mentah dari Tesseract) ===');
+      console.log(data.text);
+      if (data.tsv) {
+        console.log('=== [DEBUG OCR] rebuildLinesFromTsv() ===');
+        console.log(rebuildLinesFromTsv(data.tsv));
+      }
+
       // Upaya pertama: pakai teks hasil layout analysis Tesseract sendiri.
       const rawTextDefault = data.text || '';
       let records = parsePdfRowsClient(rawTextDefault);
+      console.log('=== [DEBUG OCR] records dari data.text ===', records);
       if (records.length > 0) {
         return { rawText: rawTextDefault, records };
       }
@@ -929,6 +940,7 @@
       if (data.tsv) {
         const rawTextRebuilt = rebuildLinesFromTsv(data.tsv);
         records = parsePdfRowsClient(rawTextRebuilt);
+        console.log('=== [DEBUG OCR] records dari TSV rebuild ===', records);
         if (records.length > 0) {
           return { rawText: rawTextRebuilt, records };
         }
