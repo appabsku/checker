@@ -10,25 +10,6 @@
     pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
   }
 </script>
-<!-- PATCH 10-08-2026 (e): Tesseract.js (OCR gambar langsung di browser) SUDAH
-     DIHAPUS dari sini. Sempat dicoba di PATCH 10-08-2026 (c) tapi TERBUKTI
-     GAGAL TOTAL untuk gambar tabel bergaris asli (12.jpg, cabang
-     RANDUBLATUNG) -- garis tabel ikut terbaca sebagai karakter, 0 baris
-     berhasil diparse di SETIAP percobaan (baik dari data.text maupun dari
-     TSV rebuild). Karena selalu gagal untuk kasus nyata yang justru paling
-     sering muncul (gambar hasil scan/foto laporan yang bergaris tabel),
-     Tesseract cuma menambah 5-15 detik latensi tiap upload gambar SEBELUM
-     akhirnya fallback ke server -- tanpa nilai tambah apapun. Ini juga yang
-     membuat catatan di Code.gs (yang bilang OCR gambar sudah "dikembalikan
-     sepenuhnya ke server") jadi TIDAK SINKRON dengan file HTML ini, yang
-     ternyata masih menjalankan Tesseract di setiap upload gambar. Sekarang
-     keduanya sudah sinkron kembali: gambar (JPG/PNG/GIF/BMP) langsung
-     dikirim sebagai base64 ke server, di-OCR lewat Google Drive
-     (extractViaGoogleDocs() + prioritas tableRecords, lihat PATCH
-     10-08-2026 (d) di Code.gs). Kalau suatu saat mau dicoba lagi OCR
-     client-side, sebaiknya pakai library yang mendukung mode "table" /
-     pra-pemrosesan gambar (deskew, threshold, hapus garis tabel) dulu --
-     bukan Tesseract default apa adanya. -->
 <style>
   :root{
     --biru-tua:#003c71;
@@ -261,7 +242,7 @@
     </div>
 
     <label class="drop" id="drop">
-      <input type="file" id="file" accept=".pdf,application/pdf,.doc,.docx,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.xlsx,.xls,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,.csv,text/csv,image/*">
+      <input type="file" id="file" accept=".pdf,application/pdf">
       <div><strong>Klik atau seret file</strong> ke sini</div>
       <div class="hint">Laporan Mutasi Harian Pinjaman — PDF</div>
       <div class="filename" id="filename"></div>
@@ -392,6 +373,14 @@
   fileInput.addEventListener('change', e => { if (e.target.files.length) setFile(e.target.files[0]); });
 
   function setFile(f) {
+    const ext = (f.name.split('.').pop() || '').toLowerCase();
+    if (ext !== 'pdf') {
+      statusEl.textContent = 'Format file tidak didukung -- hanya file PDF yang bisa diproses.';
+      filenameEl.textContent = '';
+      runBtn.disabled = true;
+      selectedFile = null;
+      return;
+    }
     if (f.size > MAX_FILE_SIZE_BYTES) {
       statusEl.textContent = 'File terlalu besar (' + (f.size / 1024 / 1024).toFixed(1) +
         ' MB). Maksimal ' + (MAX_FILE_SIZE_BYTES / 1024 / 1024) + ' MB -- coba kompres/scan ulang dengan resolusi lebih rendah.';
@@ -456,15 +445,10 @@
         }
       }
 
-      // PATCH 10-08-2026 (e): foto/scan (JPG/PNG/GIF/BMP) SELALU dikirim ke
-      // server sebagai base64 -- OCR-nya dilakukan di sana lewat Google
-      // Drive (extractViaGoogleDocs(), yang sejak PATCH 10-08-2026 (d) di
-      // Code.gs sudah memprioritaskan tableRecords/tabel asli yang
-      // terdeteksi Google, jauh lebih akurat daripada tebak-tebakan teks
-      // lepas). Percobaan OCR client-side lewat Tesseract.js (PATCH
-      // 10-08-2026 c) SUDAH DIHAPUS dari file ini -- lihat catatan panjang
-      // di dekat tag <script> Tesseract yang (sudah tidak ada) di <head>.
-
+      // Kalau parsing di browser gagal atau belum menghasilkan baris apapun
+      // (mis. PDF hasil scan tanpa teks asli), fallback: kirim file PDF-nya
+      // sebagai base64 supaya diproses di server (lihat extractViaGoogleDocs()
+      // di Code.gs).
       if (!payload) {
         statusEl.textContent = 'Membaca file...';
         const base64 = await fileToBase64(selectedFile);
