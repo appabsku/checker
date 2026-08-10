@@ -1,912 +1,1350 @@
-<!DOCTYPE html>
-<html lang="id">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>APK Checker — KSPPS Artha Bahana Syariah</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-<script>
-  if (window.pdfjsLib) {
-    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-  }
-</script>
-<!-- PATCH 10-08-2026 (e): Tesseract.js (OCR gambar langsung di browser) SUDAH
-     DIHAPUS dari sini. Sempat dicoba di PATCH 10-08-2026 (c) tapi TERBUKTI
-     GAGAL TOTAL untuk gambar tabel bergaris asli (12.jpg, cabang
-     RANDUBLATUNG) -- garis tabel ikut terbaca sebagai karakter, 0 baris
-     berhasil diparse di SETIAP percobaan (baik dari data.text maupun dari
-     TSV rebuild). Karena selalu gagal untuk kasus nyata yang justru paling
-     sering muncul (gambar hasil scan/foto laporan yang bergaris tabel),
-     Tesseract cuma menambah 5-15 detik latensi tiap upload gambar SEBELUM
-     akhirnya fallback ke server -- tanpa nilai tambah apapun. Ini juga yang
-     membuat catatan di Code.gs (yang bilang OCR gambar sudah "dikembalikan
-     sepenuhnya ke server") jadi TIDAK SINKRON dengan file HTML ini, yang
-     ternyata masih menjalankan Tesseract di setiap upload gambar. Sekarang
-     keduanya sudah sinkron kembali: gambar (JPG/PNG/GIF/BMP) langsung
-     dikirim sebagai base64 ke server, di-OCR lewat Google Drive
-     (extractViaGoogleDocs() + prioritas tableRecords, lihat PATCH
-     10-08-2026 (d) di Code.gs). Kalau suatu saat mau dicoba lagi OCR
-     client-side, sebaiknya pakai library yang mendukung mode "table" /
-     pra-pemrosesan gambar (deskew, threshold, hapus garis tabel) dulu --
-     bukan Tesseract default apa adanya. -->
-<style>
-  :root{
-    --biru-tua:#003c71;
-    --biru:#00529c;
-    --biru-terang:#0072ce;
-    --emas:#f2a900;
-    --emas-muda:#ffd166;
-    --abu-bg:#eef1f5;
-    --putih:#ffffff;
-    --teks:#1c2b39;
-    --teks-muted:#6b7b8c;
-    --hijau:#1a8a4a;
-    --merah:#d63447;
-    --garis:#dbe3ea;
-    --cyan:#00b8d9; --green:#1a8a4a;
-    --radius:10px;
+/**
+ * ============================================================================
+ *  KSPPS ABS - LAPORAN vs SPREADSHEET CHECKER
+ * ============================================================================
+ *  Cara pakai singkat ada di README.md.
+ *
+ *  Alur:
+ *   1. User upload file "Laporan Mutasi Harian Pinjaman" (harian). Format yang
+ *      didukung: PDF, Word (.doc/.docx), Excel (.xlsx/.xls), CSV, atau
+ *      foto/scan (JPG/PNG/GIF/BMP) -- lihat PATCH 08-08-2026 (a) di bawah.
+ *   2. Script membaca file itu sesuai formatnya (PDF/Word/gambar diubah ke
+ *      Google Doc dulu -- gambar lewat OCR -- lalu diambil teksnya; Excel
+ *      diubah ke Google Sheets; CSV dibaca langsung) -> diparse jadi baris
+ *      {nama, amounts}.
+ *   3. Script mencocokkan SETIAP SHEET/TAB yang ada di SPREADSHEET UTAMA
+ *      (Checker Nisbah -- link GANTI TIAP BULAN/CABANG, sama seperti
+ *      spreadsheet kedua).
+ *   4. Script JUGA mencocokkan SETIAP SHEET/TAB yang ada di SPREADSHEET KEDUA
+ *      (Potensi Nisbah -- link GANTI TIAP BULAN, isinya sheet per cabang:
+ *      WIROsari, Purwodadi, RANDUblatung, SRAGEN, KEDAWUNG, TANONG, ANDONG).
+ *      Dulu cuma 1 sheet/gid tertentu dari spreadsheet kedua yang diproses;
+ *      sekarang SEMUA sheet-nya diproses otomatis, sama seperti spreadsheet
+ *      utama -- jadi tiap bulan cukup ganti 1 link (ID spreadsheet-nya saja,
+ *      tidak perlu gid per cabang).
+ *      (kolom B=NAMA, E=SALDO AWAL, F=POT.BASIL) dengan data laporan
+ *      (NAMA, POKOK, BASIL). Sheet yang tidak punya header "NAMA" di 30
+ *      baris pertama kolom B otomatis dilewati (dianggap bukan sheet data
+ *      mutasi -- misalnya sheet ringkasan/template), KECUALI di spreadsheet
+ *      kedua yang pakai fallback baris 9 (lihat SECOND_SHEET_FALLBACK_ROW)
+ *      karena template cabang di situ sudah dikenal selalu mulai baris 9.
+ *        - NAMA + SALDO AWAL cocok dengan NAMA + POKOK  -> warna baris #00ffff
+ *        - NAMA + POT.BASIL  cocok dengan NAMA + BASIL  -> warna baris #00ff00
+ *        - kalau dua-duanya cocok -> baris diwarnai #00ff00 (hijau menang,
+ *          karena itu tandanya pokok & basil sama-sama sudah masuk).
+ *          Ganti konstanta BOTH_MATCH_COLOR di bawah kalau mau warna lain.
+ *        - NAMA sudah cocok UNIK (bukan tebakan ambigu) tapi TIDAK ADA satu
+ *          pun angka (pokok/basil) yang nyambung -> warna baris #ffff00
+ *          (kuning) -- tanda "nama pasti sama orangnya, tapi angkanya perlu
+ *          dicek manual", BUKAN dianggap tidak ketemu. Lihat PATCH
+ *          05-08-2026 (b) di bawah.
+ *
+ *  CATATAN: doGet() sengaja tidak ada (dihapus). Web app ini hanya dipakai
+ *  lewat POST (fetch dari halaman APK Checker statis) -> ditangani doPost().
+ *  Kalau ada yang buka link .../exec langsung di browser, akan muncul error
+ *  standar dari Google ("Script function not found: doGet") -- itu wajar dan
+ *  tidak memengaruhi alur upload file yang sebenarnya.
+ *
+ *  ---------------------------------------------------------------------
+ *  (... patch-patch sebelumnya sampai 10-08-2026 (d) tidak diubah, lihat
+ *  histori/README project untuk detailnya ...)
+ *
+ *  PATCH 10-08-2026 (e): Tesseract.js (OCR gambar client-side) dihapus dari
+ *  front-end HTML -- terbukti selalu gagal total untuk gambar tabel bergaris
+ *  (0 baris terbaca di setiap percobaan). OCR gambar sepenuhnya lewat server
+ *  (extractViaGoogleDocs()).
+ *
+ *  PATCH 10-08-2026 (f): investigasi lanjutan dengan TEST_debugExtraction()
+ *  terhadap 2 versi gambar laporan cabang RANDUBLATUNG (12.jpg DAN 12.png,
+ *  resolusi tinggi) menemukan bahwa Google Drive OCR MEMANG TIDAK PERNAH
+ *  berhasil mendeteksi struktur Tabel dari gambar laporan ini sama sekali
+ *  (JUMLAH TABEL TERDETEKSI: 0 di kedua file) -- ini BUKAN soal format/
+ *  resolusi gambar, tapi soal rendering garis tabelnya sendiri yang
+ *  sepertinya tidak dikenali algoritma deteksi tabel Google.
+ *
+ *  Karena tableRecords SELALU kosong utk gambar jenis ini, beban penuh jatuh
+ *  ke textRecords (parser fallback teks lepas). Dari analisis rawText hasil
+ *  OCR (lihat log 12.png), ditemukan pola spesifik: OCR MEMBACA MAYORITAS
+ *  baris (baris ke-4 dst) dengan urutan row-major yang RAPI (Nama+Pokok+
+ *  Basil+dst per baris, benar), TAPI untuk BEBERAPA baris PERTAMA (yang
+ *  posisinya berdekatan dgn baris header "Pokok Basil Kifarat Ppj Ke
+ *  Pembiayaan" yang terpisah baris di gambar aslinya), OCR malah membaca
+ *  SEMUA nama baris² itu dulu, BARU SEMUA angkanya belakangan sebagai satu
+ *  blok gabungan. Parser eliminasi lama (parsePdfTextFallback(), berbasis
+ *  urutan baris teks) TIDAK bisa membedakan kasus ini dari kasus normal --
+ *  akibatnya angka milik SUKARJI/NURYATI/MUDLOFAR (baris 1-3) malah
+ *  ketuker-tuker AWALNYA, dan pergeseran itu MENULAR ke seluruh baris di
+ *  bawahnya (root cause di balik "semua nama ketemu tapi Pokok/Basil kosong
+ *  semua" yang dilaporkan user).
+ *
+ *  Solusi: fungsi BARU parseByNomorAnchor() (di bawah), yang menjangkarkan
+ *  SETIAP baris ke pola "Nomor Pinjaman" (format XX-NNNNN, mis. "26-00003")
+ *  -- pola ini TERBUKTI selalu muncul PERSIS 1x per baris data (bukan header/
+ *  total), dan tetap terbaca benar oleh regex meskipun ada karakter nyasar
+ *  nempel di depannya (mis. "626-00162", "826-00128" -- terbukti dari log,
+ *  regex \d{2}-\d{5} tetap match "26-00162"/"26-00128" dengan benar karena
+ *  regex tidak butuh match dari awal string). Untuk SETIAP baris (segmen
+ *  antara 2 Nomor Pinjaman berurutan), diambil nama & SEMUA angka uang yang
+ *  benar-benar muncul DI DALAM segmen itu saja -- BUKAN dari tebakan urutan
+ *  lintas-baris seperti sebelumnya.
+ *
+ *  Kalau di suatu segmen masih ada kata header (Pokok/Basil/Kifarat/dst)
+ *  ikut nyempil (tanda blok header OCR ikut kebawa ke situ, spt kasus baris
+ *  1-3 di atas), parser BARU INI SENGAJA TIDAK MENEBAK -- nama tetap
+ *  dicatat, tapi TANPA angka (amounts: []). Efeknya di sheet: baris itu
+ *  akan tetap "ketemu by nama" (kuning, PATCH 05-08-2026 b) yang memang
+ *  butuh cek manual -- jauh lebih aman drpd angka SALAH PASANG ke orang
+ *  lain seperti sebelumnya.
+ *
+ *  extractViaGoogleDocs() sekarang MENCOBA parseByNomorAnchor() LEBIH DULU
+ *  (kalau menghasilkan >0 baris), baru fallback ke parsePdfTextFallback()
+ *  lama kalau anchor Nomor Pinjaman tidak ditemukan sama sekali (mis. utk
+ *  jenis laporan lain yang formatnya beda, tidak punya kolom Nomor).
+ *
+ *  KETERBATASAN YANG MASIH ADA (disengaja, demi keamanan): baris² yang
+ *  posisinya tepat berdekatan dengan blok header ATAU baris TOTAL di gambar
+ *  asli tetap berisiko tidak dapat angka sama sekali (amounts kosong) --
+ *  ini SENGAJA, karena parser tidak mau menebak dan berisiko salah pasang.
+ *  Baris² begini akan tetap perlu dicek manual lewat highlight kuning atau
+ *  daftar "nama tidak ketemu". Kalau volume baris begini banyak & mengganggu,
+ *  solusi permanen yang lebih baik adalah minta laporan dalam format PDF asli
+ *  (bukan gambar/screenshot) dari sistem sumbernya -- karena jalur PDF sudah
+ *  terbukti 100% akurat lewat pdf.js di browser, tanpa OCR sama sekali.
+ *  ---------------------------------------------------------------------
+ * ============================================================================
+ */
 
-    /* alias supaya kompatibel dengan nama variabel lama di bawah */
-    --ink:var(--teks); --paper:var(--abu-bg); --card:var(--putih); --line:var(--garis);
-    --accent:var(--biru); --accent-dark:var(--biru-tua); --muted:var(--teks-muted);
-  }
-  *{box-sizing:border-box;}
-  body{
-    margin:0; font-family:'Segoe UI',system-ui,Arial,sans-serif; background:var(--paper);
-    color:var(--ink);
-  }
-  header{
-    background:linear-gradient(135deg,var(--biru-tua) 0%, var(--biru) 60%, var(--biru-terang) 100%);
-    color:#fff; padding:28px 20px 40px; text-align:center;
-    box-shadow:0 3px 10px rgba(0,0,0,.15);
-  }
-  header .brand-row{
-    display:flex; align-items:center; justify-content:center; gap:12px; flex-wrap:wrap;
-  }
-  header .mark{
-    width:40px;height:40px;border-radius:10px;
-    background:var(--emas);
-    display:flex;align-items:center;justify-content:center;
-    font-weight:800;color:var(--biru-tua);font-size:18px;
-  }
-  header h1{margin:0 0 6px; font-size:26px; letter-spacing:.2px;}
-  header p{margin:0; opacity:.85; font-size:14px;}
+// ---------------------------------------------------------------------------
+// KONFIGURASI - sesuaikan kalau struktur sheet berubah
+// ---------------------------------------------------------------------------
+const CONFIG = {
+  // Spreadsheet utama (Checker Nisbah). Nilai di bawah ini cuma
+  // DEFAULT/cadangan -- link yang sebenarnya dipakai disimpan di Script
+  // Properties lewat tombol "Simpan" di halaman APK Checker (atau manual
+  // lewat GANTI_LINK_UTAMA() di bagian bawah file ini). SEMUA sheet/tab di
+  // spreadsheet ini diproses otomatis -- lihat getAllSheetsIn() di bawah.
+  // Sheet yang tidak ada header "NAMA" di 30 baris pertama kolom B akan
+  // dilewati (skip), tidak ditebak-tebak.
+  SPREADSHEET_ID_MAIN: '1uG51BxqICRe4uR9taldRSxiW7uWFPeyksNOzys8nL08',
 
-  nav.menu{
-    max-width:640px; margin:0 auto; margin-top:14px;
-    display:flex; justify-content:center; gap:10px; flex-wrap:wrap;
-  }
-  nav.menu a{
-    display:inline-flex; align-items:center; gap:6px;
-    background:rgba(255,255,255,.12);
-    border:1px solid rgba(255,255,255,.35);
-    color:#fff; text-decoration:none;
-    padding:8px 16px; border-radius:20px; font-size:12.5px; font-weight:600;
-    transition:.15s background,.15s transform;
-  }
-  nav.menu a:hover{background:rgba(255,255,255,.22); transform:translateY(-1px);}
-  nav.menu a.aktif{
-    background:var(--emas); color:var(--biru-tua); border-color:var(--emas);
-  }
+  // Spreadsheet kedua (Potensi Nisbah). Link ini GANTI TIAP BULAN -- nilai di
+  // bawah ini cuma DEFAULT/cadangan. Link yang sebenarnya dipakai disimpan di
+  // Script Properties lewat tombol "Simpan" di halaman APK Checker (atau
+  // manual lewat GANTI_LINK_BULANAN() di bagian bawah file ini).
+  // SEMUA sheet/tab di spreadsheet ini ikut diproses otomatis juga.
+  SPREADSHEET_ID_SECOND: '1PuWW5nHlYHkMTLz2dcW2qP9mPgLboMTrhxQAB26oEAU',
 
-  main{
-    max-width:640px; margin:-26px auto 60px; padding:0 20px;
-  }
-  .card{
-    background:var(--card); border:1px solid var(--line); border-radius:16px;
-    padding:28px; box-shadow:0 10px 30px -18px rgba(10,60,45,.35); margin-bottom:20px;
-  }
-  .drop{
-    border:2px dashed var(--line); border-radius:12px; padding:30px 20px; text-align:center;
-    cursor:pointer; transition:.15s border-color,.15s background;
-  }
-  .drop.drag{border-color:var(--biru-terang); background:#eef6ff;}
-  .drop input{display:none;}
-  .drop .hint{font-size:13px; color:var(--muted); margin-top:6px;}
-  .filename{margin-top:12px; font-size:13.5px; color:var(--accent-dark); font-weight:600;}
-  button{
-    margin-top:20px; width:100%; padding:13px; border:none; border-radius:9px;
-    background:linear-gradient(135deg, var(--emas) 0%, var(--emas-muda) 100%);
-    color:var(--biru-tua); font-size:15px; font-weight:800; cursor:pointer;
-    box-shadow:0 3px 8px rgba(242,169,0,.35);
-    transition:.15s transform,.15s box-shadow;
-  }
-  button:hover:not(:disabled){transform:translateY(-1px); box-shadow:0 5px 12px rgba(242,169,0,.45);}
-  button:disabled{opacity:.45; cursor:default; box-shadow:none; transform:none;}
-  .legend{display:flex; gap:16px; margin-top:16px; font-size:12.5px; color:var(--muted); flex-wrap:wrap;}
-  .swatch{width:12px; height:12px; border-radius:3px; display:inline-block; margin-right:5px; vertical-align:-1px; border:1px solid rgba(0,0,0,.15);}
-  #status{margin-top:16px; font-size:13.5px; white-space:pre-wrap; line-height:1.5;}
+  // Sheet cabang di spreadsheet kedua sudah dikenal templatenya selalu mulai
+  // data di baris ini (dipakai kalau header "NAMA" tidak ketemu otomatis).
+  SECOND_SHEET_FALLBACK_ROW: 9,
 
-  /* tabel hasil dibuat scroll, header nempel di atas saat discroll */
-  .table-wrap{
-    max-height:360px; overflow-y:auto; margin-top:14px;
-    border:1px solid var(--line); border-radius:8px;
-  }
-  table{width:100%; border-collapse:collapse; font-size:12.5px;}
-  th,td{border:1px solid var(--line); padding:6px 8px; text-align:left;}
-  th{background:#eef5f1; position:sticky; top:0; z-index:1;}
-  td.col-no{width:44px; text-align:right; color:var(--muted);}
+  // Kolom di kedua spreadsheet (1 = A, 2 = B, dst.)
+  COL_NAMA: 2,        // B
+  COL_SALDO_AWAL: 5,  // E  (dicocokkan dengan POKOK dari laporan)
+  COL_POT_BASIL: 6,   // F  (dicocokkan dengan BASIL dari laporan)
 
-  .config-note{
-    font-size:12px; color:var(--muted); background:#fbf6e8; border:1px solid #ecdca6;
-    border-radius:8px; padding:10px 12px; margin-bottom:18px;
-  }
-  code{background:#eef3f0; padding:1px 5px; border-radius:4px; font-size:11.5px;}
+  // Range kolom yang diwarnai per baris yang cocok
+  COLOR_COL_START: 1,  // A
+  COLOR_COL_END: 26,   // Z
 
-  .warn-box{
-    margin-top:18px; border:1px solid #ecc6a6; background:#fdf3ea; border-radius:10px;
-    padding:12px 14px;
-  }
-  .warn-box h4{margin:0 0 6px; font-size:13.5px; color:#8a4b12;}
-  .warn-box p{margin:0 0 8px; font-size:12px; color:var(--muted);}
-  .warn-list{list-style:none; margin:0; padding:0; font-size:12.5px;}
-  .warn-list li{
-    padding:7px 0; border-top:1px solid #f1ddc7;
-  }
-  .warn-list li:first-child{border-top:none;}
-  .warn-name{font-weight:600; color:var(--ink);}
-  .warn-hint{display:block; margin-top:3px; color:#8a4b12; font-size:11.5px;}
-  .warn-hint.none{color:var(--muted);}
+  COLOR_POKOK: '#00ffff',
+  COLOR_BASIL: '#00ff00',
+  BOTH_MATCH_COLOR: '#00ff00', // dipakai kalau pokok & basil dua-duanya cocok
 
-  .link-box{
-    display:flex; align-items:center; gap:10px; flex-wrap:wrap;
-    background:#f5f8fb; border:1px solid var(--line); border-radius:8px;
-    padding:10px 12px; margin-bottom:10px;
-  }
-  .link-box .link-text{
-    flex:1 1 auto; min-width:0;
-    font-family:'Consolas',monospace; font-size:12px; color:var(--biru-terang);
-    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
-  }
-  .link-box .link-open{
-    flex:0 0 auto;
-    font-size:11.5px; font-weight:700; color:var(--biru-tua);
-    background:#fff; border:1px solid var(--line); border-radius:6px;
-    padding:5px 10px; text-decoration:none; white-space:nowrap;
-  }
-  .link-box .link-open:hover{background:#eef5ff;}
+  // PATCH 05-08-2026 (b): warna untuk baris yang namanya sudah cocok UNIK
+  // tapi tidak ada satupun angka (pokok/basil) yang nyambung -- lihat
+  // catatan patch di kepala file. Ganti kalau mau warna lain.
+  COLOR_NAME_ONLY: '#ffff00',
 
-  /* header kartu link, dengan tombol show/hide di sebelah kanan */
-  .card-head{
-    display:flex; align-items:center; justify-content:space-between; gap:10px;
-  }
-  .card-head .card-title{font-size:14.5px; font-weight:600;}
-  .toggle-btn{
-    margin-top:0; width:auto; padding:7px 14px; font-size:12px; font-weight:700;
-    background:#eef1f5; color:var(--biru-tua); box-shadow:none; border:1px solid var(--line);
-  }
-  .toggle-btn:hover:not(:disabled){transform:none; box-shadow:none; background:#e3e8ee;}
-  .link-body{margin-top:14px;}
-  .link-body.hidden{display:none;}
+  // Toleransi selisih angka (karena pembulatan desimal) sebelum dianggap "sama"
+  NUMBER_TOLERANCE: 1,
 
-  .sub-label{
-    font-size:13px; font-weight:700; color:var(--biru-tua); margin-bottom:6px;
-    display:flex; align-items:center; gap:6px;
-  }
-  .sub-badge{
-    font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.3px;
-    background:var(--abu-bg); color:var(--muted); border:1px solid var(--line);
-    border-radius:5px; padding:1px 6px;
-  }
-  .link-divider{margin:22px 0; border:none; border-top:1px dashed var(--line);}
+  // PATCH 05-08-2026 (c): pemetaan nama cabang yang muncul di judul laporan
+  // ("KSPPS. ... <NAMA CABANG>") ke nama TAB/sheet yang sesuai di KEDUA
+  // spreadsheet (Checker Nisbah maupun Potensi Nisbah). Dipakai supaya
+  // laporan satu cabang HANYA dicocokkan ke tab cabang itu sendiri, tidak
+  // lagi dicocokkan ke SEMUA tab (yang menyebabkan nama kembar antar-cabang,
+  // mis. "SUMINI" di RANDU vs "SUMINI" di PWD, saling tertukar).
+  // Urutan tidak penting, tapi pattern harus SPESIFIK (hindari pattern
+  // pendek yang bisa nyantol ke nama cabang lain).
+  BRANCH_MAP: [
+    { pattern: /RANDUBLATUNG/i, sheetName: 'RANDU' },
+    { pattern: /PURWODADI/i, sheetName: 'PWD' },
+    { pattern: /WIROSARI/i, sheetName: 'WIRO' },
+    { pattern: /SRAGEN/i, sheetName: 'SRAGEN' },
+    { pattern: /TANON(G)?/i, sheetName: 'TANON' },
+    { pattern: /ANDONG/i, sheetName: 'ANDONG' },
+  ],
+};
 
-  /* ---- Kalkulator AKP ---- */
-  .akp-grid{display:flex; gap:10px; margin:14px 0 4px; flex-wrap:wrap;}
-  .akp-field{flex:1; min-width:110px;}
-  .akp-field label{font-size:12px; color:var(--muted); display:block; margin-bottom:4px; font-weight:600;}
-  .akp-field select, .akp-field input[type="number"]{
-    width:100%; padding:9px 10px; border:1px solid var(--line); border-radius:8px; font-size:13.5px;
-  }
-  .akp-hari-box{
-    background:var(--abu-bg); border:1px solid var(--line); border-radius:8px;
-    padding:9px 10px; font-weight:800; color:var(--biru-tua); font-size:13.5px; text-align:center;
-  }
-  .akp-note{font-size:11.5px; color:var(--muted); margin:6px 0 16px; line-height:1.5;}
-  table.akp-table input{
-    width:100%; border:1px solid var(--line); border-radius:6px; padding:6px 7px; font-size:12.5px;
-    box-sizing:border-box;
-  }
-  table.akp-table input[type="number"], table.akp-table input.akp-saldo{text-align:right;}
-  /* hilangkan tombol scroll/spinner atas-bawah pada kolom angka */
-  table.akp-table input[type="number"]::-webkit-inner-spin-button,
-  table.akp-table input[type="number"]::-webkit-outer-spin-button{
-    -webkit-appearance:none; margin:0;
-  }
-  table.akp-table input[type="number"]{-moz-appearance:textfield;}
-  table.akp-table input.akp-locked{
-    background:var(--abu-bg); color:var(--ink); font-weight:700; cursor:default;
-    border-color:var(--line);
-  }
-  table.akp-table td.akp-hasil{text-align:right; font-weight:700; white-space:nowrap;}
-  .akp-hapus{
-    background:none; border:none; color:var(--merah); font-weight:800; cursor:pointer;
-    margin:0; padding:2px 6px; box-shadow:none; width:auto; font-size:14px;
-  }
-  #akpAddRow{
-    margin-top:10px; width:auto; padding:8px 16px; font-size:12.5px; font-weight:700;
-    background:#eef1f5; color:var(--biru-tua); box-shadow:none; border:1px solid var(--line);
-  }
-  #akpAddRow:hover{background:#e3e8ee; transform:none; box-shadow:none;}
-  .akp-total-box{
-    margin-top:18px; background:#fdf6e3; border:1px solid var(--emas); border-radius:10px;
-    padding:16px; text-align:center; display:none;
-  }
-  .akp-total-box .akp-total-label{font-size:12px; color:var(--muted); font-weight:700; letter-spacing:.3px;}
-  .akp-total-box .akp-total-value{font-size:24px; font-weight:800; color:var(--biru-tua); margin-top:4px;}
-</style>
-</head>
-<body>
-<header>
-  <div class="brand-row">
-    <div class="mark">AB</div>
-    <div>
-      <h1>APK Checker</h1>
-      <p>Pencocokan mutasi harian pinjaman — Artha Bahana Syariah</p>
-    </div>
-  </div>
-  <nav class="menu">
-    <a href="#" class="aktif" data-tab="checker" onclick="showView('checker');return false;">APK Checker</a>
-    <a href="https://appabsku.github.io/nisbah/">📊 ANALISA NISBAH</a>
-    <a href="https://appabsku.github.io/datakol/">📑 Ekstrak 234</a>
-    <a href="#" data-tab="kalkulator" onclick="showView('kalkulator');return false;">🧮 KAL AKP</a>
-  </nav>
-</header>
+// Timpa SPREADSHEET_ID_MAIN & SPREADSHEET_ID_SECOND dengan nilai yang
+// tersimpan di Script Properties (kalau ada) -- ini yang bikin ganti link
+// bulanan/per-cabang tidak perlu deploy ulang web app. Lihat
+// GANTI_LINK_UTAMA() dan GANTI_LINK_BULANAN() di bagian bawah file.
+(function applyScriptPropertyOverrides() {
+  const props = PropertiesService.getScriptProperties();
+  const mainOverride = props.getProperty('SPREADSHEET_ID_MAIN');
+  if (mainOverride) CONFIG.SPREADSHEET_ID_MAIN = mainOverride;
+  const secondOverride = props.getProperty('SPREADSHEET_ID_SECOND');
+  if (secondOverride) CONFIG.SPREADSHEET_ID_SECOND = secondOverride;
+})();
 
-<main>
-<div id="viewChecker">
-  <div class="card">
-    <div class="config-note" id="configNote">
-      Web app belum dikonfigurasi. Isi <code>WEB_APP_URL</code> di bagian atas file ini
-      dengan URL hasil deploy Apps Script (Deploy → New deployment → Web app).
-    </div>
+// ---------------------------------------------------------------------------
+// WEB APP ENTRY POINTS
+// ---------------------------------------------------------------------------
 
-    <label class="drop" id="drop">
-      <input type="file" id="file" accept=".pdf,application/pdf,.doc,.docx,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.xlsx,.xls,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,.csv,text/csv,image/*">
-      <div><strong>Klik atau seret file</strong> ke sini</div>
-      <div class="hint">Laporan Mutasi Harian Pinjaman — PDF, Word (.doc/.docx), Excel (.xlsx/.xls), CSV, atau foto/scan (JPG/PNG)</div>
-      <div class="filename" id="filename"></div>
-    </label>
+/**
+ * Dipanggil oleh website statis (GitHub Pages) lewat fetch() POST.
+ * Jenis body yang diterima:
+ *   1) Proses file (default, tanpa "action"):
+ *      { "fileName": "PIN_LP1.pdf", "base64": "<data file base64, tanpa prefix>" }
+ *      Format fileName yang didukung (dibaca dari ekstensinya): .pdf, .doc,
+ *      .docx, .xlsx, .xls, .csv, .jpg/.jpeg, .png, .gif, .bmp
+ *      Balasan: { ok, summary, rows, namaTidakKetemu }
+ *   2) Ganti/lihat link spreadsheet UTAMA (Checker Nisbah) dari HTML, tanpa
+ *      perlu buka Apps Script editor:
+ *      { "action": "setLinkUtama", "url": "<link spreadsheet dari address bar>" }
+ *      Balasan: { ok, url }
+ *      { "action": "getLinkUtama" }
+ *      Balasan: { ok, url }
+ *   3) Ganti/lihat link spreadsheet KEDUA (Potensi Nisbah) dari HTML, tanpa
+ *      perlu buka Apps Script editor:
+ *      { "action": "setLinkKedua", "url": "<link spreadsheet dari address bar>" }
+ *      Balasan: { ok, url }
+ *      { "action": "getLinkKedua" }
+ *      Balasan: { ok, url }
+ */
+function doPost(e) {
+  try {
+    const body = JSON.parse(e.postData.contents);
 
-    <div class="legend">
-      <span><span class="swatch" style="background:var(--cyan)"></span>Pokok cocok dengan Saldo Awal</span>
-      <span><span class="swatch" style="background:var(--green)"></span>Basil cocok dengan Pot. Basil</span>
-    </div>
-
-    <button id="run" disabled>Proses & Cocokkan</button>
-    <div id="status"></div>
-  </div>
-
-  <div class="card">
-    <div class="card-head">
-      <div class="card-title">GANTI LINK SHEET DI SINI DULU:</div>
-      <button type="button" class="toggle-btn" id="toggleLink">Tampilkan</button>
-    </div>
-    <div class="link-body hidden" id="linkBody">
-
-      <div class="sub-label">Link Checker Nisbah</div>
-      <div id="linkUtamaCurrent" style="font-size:12.5px; color:var(--muted); margin-bottom:10px;">Memuat link yang sedang dipakai...</div>
-      <input type="text" id="linkUtamaInput" placeholder="https://docs.google.com/spreadsheets/d/.../edit?usp=sharing"
-        style="width:100%; padding:10px; border:1px solid var(--line); border-radius:8px; font-size:13px; box-sizing:border-box;">
-      <button id="saveLinkUtama" style="margin-top:10px;">Simpan Link Checker Nisbah</button>
-      <div id="linkUtamaStatus" style="margin-top:10px; font-size:13px;"></div>
-
-      <hr class="link-divider">
-
-      <div class="sub-label">Link Potensi Nisbah</div>
-      <div id="linkKeduaCurrent" style="font-size:12.5px; color:var(--muted); margin-bottom:10px;">Memuat link yang sedang dipakai...</div>
-      <input type="text" id="linkKeduaInput" placeholder="https://docs.google.com/spreadsheets/d/.../edit?usp=sharing"
-        style="width:100%; padding:10px; border:1px solid var(--line); border-radius:8px; font-size:13px; box-sizing:border-box;">
-      <button id="saveLinkKedua" style="margin-top:10px;">Simpan Link Potensi Nisbah</button>
-      <div id="linkKeduaStatus" style="margin-top:10px; font-size:13px;"></div>
-
-    </div>
-  </div>
-</div>
-
-<div id="viewKalkulator" style="display:none;">
-  <div class="card">
-    <div class="card-head">
-      <div class="card-title">🧮 Kalkulator AKP (Akrual Bunga Bulanan)</div>
-    </div>
-
-    <div class="akp-grid">
-      <div class="akp-field">
-        <label>Bulan</label>
-        <select id="akpBulan"></select>
-      </div>
-      <div class="akp-field">
-        <label>Tahun</label>
-        <input type="number" id="akpTahun" step="1">
-      </div>
-      <div class="akp-field">
-        <label>Jml Hari 1 Bulan</label>
-        <div class="akp-hari-box" id="akpJmlHari">31</div>
-      </div>
-    </div>
-    <div class="akp-note">
-      Jumlah hari dihitung otomatis sesuai bulan &amp; tahun yang dipilih (Februari otomatis 28 atau 29 hari
-      tergantung tahun kabisat), dan ikut menentukan Nisbah % di bawah — makin banyak hari dalam sebulan,
-      makin besar Nisbah % dan Total AKP-nya (dan sebaliknya).
-      <br><br>
-      <strong>Cara hitung Total AKP:</strong> Nisbah % tiap kategori = rate harian tetap × jumlah hari bulan
-      berjalan. Hasil AKP = Saldo × Nisbah %. Total AKP = jumlah Hasil AKP dari semua kategori (REG + PEN +
-      UNIK). Kategori dan Nisbah % dipatenkan (tidak bisa diedit) — kolom yang bisa diisi hanya Saldo.
-    </div>
-
-    <div class="table-wrap" style="max-height:none;">
-      <table class="akp-table" id="akpTable">
-        <thead>
-          <tr><th style="width:26%;">Kategori</th><th style="width:32%;">Saldo</th><th style="width:16%;">Nisbah %</th><th style="width:20%;">Hasil AKP</th><th style="width:6%;"></th></tr>
-        </thead>
-        <tbody id="akpBody"></tbody>
-      </table>
-    </div>
-    <button type="button" id="akpAddRow">+ Tambah Baris</button>
-
-    <button type="button" id="akpHitung">Hitung Total AKP</button>
-
-    <div class="akp-total-box" id="akpTotalBox">
-      <div class="akp-total-label">TOTAL AKP</div>
-      <div class="akp-total-value" id="akpTotalValue">0</div>
-    </div>
-  </div>
-</div>
-</main>
-
-<script>
-  // -------------------------------------------------------------------
-  // GANTI dengan URL web app Apps Script hasil deploy, contoh:
-  // https://script.google.com/macros/s/AKfycb.../exec
-  // -------------------------------------------------------------------
-  const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbwrUQRrQ0J3YdlxYdq3ECvg5j_Kd4erplvEIMZa6krQAyVF0p5pkVMK5LuOUoTrRLgi/exec";
-
-  // PATCH 10-08-2026 (e): batas ukuran file sebelum dikirim ke server --
-  // Apps Script/UrlFetch punya batas payload (base64 bikin ukuran naik
-  // ~33%), dan file besar juga bikin browser lama nge-encode base64-nya.
-  // Kalau tanpa guard ini, error yang muncul ke user cuma "Gagal: Failed to
-  // fetch" yang membingungkan. Dengan guard ini, pesannya jelas dari awal.
-  const MAX_FILE_SIZE_BYTES = 15 * 1024 * 1024; // 15 MB
-
-  // PATCH 10-08-2026 (e): batas waktu tunggu respons server. Tanpa ini,
-  // kalau server macet/lambat (mis. spreadsheet besar, banyak sheet),
-  // tombol "Proses & Cocokkan" bisa "menggantung" tanpa batas waktu dan user
-  // tidak tahu harus menunggu berapa lama atau coba lagi.
-  const FETCH_TIMEOUT_MS = 90 * 1000; // 90 detik
-
-  const fileInput = document.getElementById('file');
-  const drop = document.getElementById('drop');
-  const runBtn = document.getElementById('run');
-  const statusEl = document.getElementById('status');
-  const filenameEl = document.getElementById('filename');
-  const configNote = document.getElementById('configNote');
-  let selectedFile = null;
-
-  if (WEB_APP_URL) configNote.style.display = 'none';
-
-  drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('drag'); });
-  drop.addEventListener('dragleave', () => drop.classList.remove('drag'));
-  drop.addEventListener('drop', e => {
-    e.preventDefault(); drop.classList.remove('drag');
-    if (e.dataTransfer.files.length) setFile(e.dataTransfer.files[0]);
-  });
-  fileInput.addEventListener('change', e => { if (e.target.files.length) setFile(e.target.files[0]); });
-
-  function setFile(f) {
-    if (f.size > MAX_FILE_SIZE_BYTES) {
-      statusEl.textContent = 'File terlalu besar (' + (f.size / 1024 / 1024).toFixed(1) +
-        ' MB). Maksimal ' + (MAX_FILE_SIZE_BYTES / 1024 / 1024) + ' MB -- coba kompres/scan ulang dengan resolusi lebih rendah.';
-      filenameEl.textContent = '';
-      runBtn.disabled = true;
-      selectedFile = null;
-      return;
+    if (body.action === 'setLinkUtama') {
+      const saved = saveSpreadsheetUtamaLink(body.url);
+      return jsonOutput({ ok: true, url: saved.url });
     }
-    selectedFile = f;
-    filenameEl.textContent = f.name;
-    statusEl.textContent = '';
-    runBtn.disabled = false;
+    if (body.action === 'getLinkUtama') {
+      return jsonOutput({ ok: true, url: currentSpreadsheetUtamaUrl() });
+    }
+    if (body.action === 'setLinkKedua') {
+      const saved = saveSpreadsheetKeduaLink(body.url);
+      return jsonOutput({ ok: true, url: saved.url });
+    }
+    if (body.action === 'getLinkKedua') {
+      return jsonOutput({ ok: true, url: currentSpreadsheetKeduaUrl() });
+    }
+
+    // PDF bisa diparse LANGSUNG DI BROWSER (lewat pdf.js) untuk menghindari
+    // konversi PDF->Google Docs di sisi server yang terbukti bisa mengacak
+    // urutan teks untuk sebagian file (lihat catatan patch di kepala
+    // file). Kalau body.clientRecords ada, pakai itu langsung -- server
+    // tinggal mencocokkan ke spreadsheet, tidak perlu baca file lagi.
+    if (body.clientRecords) {
+      const result = processAndMatchFromRecords(body.clientRecords, body.rawText || '', body.fileName || 'upload.pdf');
+      return jsonOutput({ ok: true, ...result });
+    }
+
+    const result = processAndMatch(body.base64, body.fileName || 'upload.pdf');
+    return jsonOutput({ ok: true, ...result });
+  } catch (err) {
+    return jsonOutput({ ok: false, error: String(err) });
+  }
+}
+
+/**
+ * Simpan link spreadsheet UTAMA (Checker Nisbah) dari sebuah URL Google
+ * Sheets -- dipakai baik oleh doPost (dari tombol di HTML) maupun
+ * GANTI_LINK_UTAMA (dijalankan manual dari editor, kalau suatu saat perlu).
+ * Hanya ID spreadsheet-nya yang dipakai -- kalau link yang di-paste ada
+ * "#gid=..."-nya, itu diabaikan karena SEMUA sheet di spreadsheet ini
+ * diproses otomatis (bukan cuma 1 gid tertentu).
+ */
+function saveSpreadsheetUtamaLink(url) {
+  const idMatch = String(url || '').match(/\/d\/([a-zA-Z0-9_-]+)/);
+  if (!idMatch) {
+    throw new Error('Link tidak valid -- pastikan itu link spreadsheet Google Sheets (ada "/d/ID.../" di URL-nya).');
+  }
+  const id = idMatch[1];
+
+  PropertiesService.getScriptProperties().setProperty('SPREADSHEET_ID_MAIN', id);
+  CONFIG.SPREADSHEET_ID_MAIN = id;
+
+  return { id: id, url: canonicalSpreadsheetUtamaUrl(id) };
+}
+
+function canonicalSpreadsheetUtamaUrl(id) {
+  return 'https://docs.google.com/spreadsheets/d/' + id + '/edit?usp=sharing';
+}
+
+function currentSpreadsheetUtamaUrl() {
+  return canonicalSpreadsheetUtamaUrl(CONFIG.SPREADSHEET_ID_MAIN);
+}
+
+/**
+ * Simpan link spreadsheet kedua (Potensi Nisbah) dari sebuah URL Google
+ * Sheets -- dipakai baik oleh doPost (dari tombol di HTML) maupun
+ * GANTI_LINK_BULANAN (dijalankan manual dari editor, kalau suatu saat perlu).
+ * Hanya ID spreadsheet-nya yang dipakai -- kalau link yang di-paste ada
+ * "#gid=..."-nya, itu diabaikan karena SEMUA sheet di spreadsheet ini
+ * sekarang diproses otomatis (bukan cuma 1 gid tertentu).
+ */
+function saveSpreadsheetKeduaLink(url) {
+  const idMatch = String(url || '').match(/\/d\/([a-zA-Z0-9_-]+)/);
+  if (!idMatch) {
+    throw new Error('Link tidak valid -- pastikan itu link spreadsheet Google Sheets (ada "/d/ID.../" di URL-nya).');
+  }
+  const id = idMatch[1];
+
+  PropertiesService.getScriptProperties().setProperty('SPREADSHEET_ID_SECOND', id);
+  CONFIG.SPREADSHEET_ID_SECOND = id;
+
+  return { id: id, url: canonicalSpreadsheetKeduaUrl(id) };
+}
+
+function canonicalSpreadsheetKeduaUrl(id) {
+  return 'https://docs.google.com/spreadsheets/d/' + id + '/edit?usp=sharing';
+}
+
+function jsonOutput(obj) {
+  return ContentService.createTextOutput(JSON.stringify(obj))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+// ---------------------------------------------------------------------------
+// FUNGSI UTAMA - dipanggil dari doPost() di atas
+// ---------------------------------------------------------------------------
+
+/**
+ * @param {string} base64Data - isi file dalam base64 (tanpa prefix "data:...;base64,")
+ * @param {string} fileName
+ * @returns {{summary: Object, rows: Array, namaTidakKetemu: Array}}
+ */
+function processAndMatch(base64Data, fileName) {
+  const extraction = extractRecordsFromFile(base64Data, fileName);
+  return processAndMatchFromRecords(extraction.records, extraction.rawText, fileName);
+}
+
+/**
+ * Inti pencocokan, dipisah dari extractRecordsFromFile() supaya bisa
+ * dipakai baik oleh jalur upload-file-biasa (base64, diproses di server)
+ * MAUPUN jalur PDF yang sudah diparse di browser (body.clientRecords --
+ * lihat doPost()).
+ * @param {Array} rawRecords - Array<{nama: string, amounts: number[]}>
+ * @param {string} rawText - dipakai untuk deteksi cabang (detectBranchSheetName)
+ * @param {string} fileName
+ */
+function processAndMatchFromRecords(rawRecords, rawText, fileName) {
+  // Sanitasi ringan -- terutama penting untuk data yang datang dari
+  // browser (clientRecords), supaya bentuknya konsisten dengan yang
+  // dihasilkan extractRecordsFromFile() di server.
+  const pdfRecords = (rawRecords || [])
+    .map(r => ({
+      nama: normalizeName(r && r.nama),
+      amounts: Array.isArray(r && r.amounts) ? r.amounts.map(Number).filter(v => !isNaN(v)) : [],
+    }))
+    .filter(r => r.nama);
+
+  if (pdfRecords.length === 0) {
+    throw new Error('Tidak ada baris data yang berhasil dibaca dari file. Cek format filenya.');
   }
 
-  // PATCH 10-08-2026 (e): fetch dengan timeout, supaya request yang macet
-  // tidak menggantung selamanya dan usernya dapat pesan yang jelas.
-  async function fetchWithTimeout(url, options, timeoutMs) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-    try {
-      return await fetch(url, { ...options, signal: controller.signal });
-    } catch (err) {
-      if (err.name === 'AbortError') {
-        throw new Error('Server tidak merespons dalam ' + (timeoutMs / 1000) + ' detik. Coba lagi, atau cek koneksi internet.');
-      }
-      throw err;
-    } finally {
-      clearTimeout(timer);
-    }
+  // PATCH 05-08-2026 (c): deteksi cabang dari judul laporan. WAJIB ketemu --
+  // kalau tidak, STOP di sini (jangan lanjut proses ke semua tab seperti
+  // dulu, karena itu penyebab nama kembar antar-cabang saling tertukar,
+  // mis. "SUMINI" milik RANDU vs "SUMINI" milik PWD).
+  const branchSheetName = detectBranchSheetName(rawText);
+  if (!branchSheetName) {
+    throw new Error('Nama cabang tidak terdeteksi dari judul laporan. Cek CONFIG.BRANCH_MAP -- ' +
+      'mungkin ada nama cabang baru yang belum terdaftar. Cuplikan teks: ' +
+      String(rawText || '').substring(0, 200));
   }
 
-  runBtn.addEventListener('click', async () => {
-    if (!selectedFile) return;
-    if (!WEB_APP_URL) {
-      statusEl.textContent = 'WEB_APP_URL belum diisi. Lihat catatan kuning di atas.';
-      return;
-    }
-    runBtn.disabled = true;
-    statusEl.textContent = 'Membaca file...';
+  // --- Proses HANYA tab yang sesuai cabang di spreadsheet utama (Checker Nisbah) ---
+  const mainSheetsAll = getAllSheetsIn(CONFIG.SPREADSHEET_ID_MAIN);
+  const mainSheets = mainSheetsAll.filter(s => sheetNameMatchesBranch(s.getName(), branchSheetName));
+  if (mainSheets.length === 0) {
+    throw new Error('Cabang "' + branchSheetName + '" terdeteksi dari laporan, tapi tidak ada tab ' +
+      'bernama itu di spreadsheet Checker Nisbah. Tab yang tersedia: ' +
+      mainSheetsAll.map(s => s.getName()).join(', '));
+  }
+  const mainAgg = processSheetsGroup(mainSheets, pdfRecords, undefined);
 
-    try {
-      const ext = (selectedFile.name.split('.').pop() || '').toLowerCase();
-      let payload = null;
+  // --- Proses HANYA tab yang sesuai cabang di spreadsheet kedua (Potensi Nisbah) ---
+  const secondSheetsAll = getAllSheetsIn(CONFIG.SPREADSHEET_ID_SECOND);
+  const secondSheets = secondSheetsAll.filter(s => sheetNameMatchesBranch(s.getName(), branchSheetName));
+  const secondAgg = processSheetsGroup(secondSheets, pdfRecords, CONFIG.SECOND_SHEET_FALLBACK_ROW);
 
-      // PATCH 10-08-2026 (a): untuk PDF, coba parse LANGSUNG DI BROWSER dulu
-      // (lewat pdf.js) -- ini menghindari konversi PDF->Google Docs di
-      // server yang terbukti bisa mengacak urutan teks untuk sebagian
-      // file. Kalau berhasil dapat baris, kirim hasil parse-nya saja
-      // (bukan file PDF-nya) ke server supaya server tinggal mencocokkan
-      // ke spreadsheet. Kalau gagal / 0 baris -> fallback ke cara lama
-      // (upload file ke server, server yang proses).
-      if (ext === 'pdf' && window.pdfjsLib) {
-        try {
-          statusEl.textContent = 'Membaca PDF di browser...';
-          const { rawText, records } = await extractPdfClientSide(selectedFile);
-          if (records.length > 0) {
-            payload = { fileName: selectedFile.name, clientRecords: records, rawText: rawText };
-          }
-        } catch (pdfErr) {
-          // biarkan payload tetap null -> jatuh ke fallback base64 di bawah
-          console.warn('Parsing PDF di browser gagal, fallback ke server:', pdfErr);
-        }
-      }
+  // --- Diagnostik: nama dari laporan yang SAMA SEKALI tidak match di sheet mana pun ---
+  const matchedPdfNamas = new Set([].concat(mainAgg.matchedPdfNamas, secondAgg.matchedPdfNamas));
+  const allSheetNames = new Set([].concat(mainAgg.allNames, secondAgg.allNames));
+  const uniquePdfNames = [...new Set(pdfRecords.map(r => r.nama))];
 
-      // PATCH 10-08-2026 (e): foto/scan (JPG/PNG/GIF/BMP) SELALU dikirim ke
-      // server sebagai base64 -- OCR-nya dilakukan di sana lewat Google
-      // Drive (extractViaGoogleDocs(), yang sejak PATCH 10-08-2026 (d) di
-      // Code.gs sudah memprioritaskan tableRecords/tabel asli yang
-      // terdeteksi Google, jauh lebih akurat daripada tebak-tebakan teks
-      // lepas). Percobaan OCR client-side lewat Tesseract.js (PATCH
-      // 10-08-2026 c) SUDAH DIHAPUS dari file ini -- lihat catatan panjang
-      // di dekat tag <script> Tesseract yang (sudah tidak ada) di <head>.
-
-      if (!payload) {
-        statusEl.textContent = 'Membaca file...';
-        const base64 = await fileToBase64(selectedFile);
-        payload = { fileName: selectedFile.name, base64: base64 };
-      }
-
-      statusEl.textContent = 'Mengirim ke server & mencocokkan spreadsheet...';
-
-      const res = await fetchWithTimeout(WEB_APP_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // hindari CORS preflight
-        body: JSON.stringify(payload)
-      }, FETCH_TIMEOUT_MS);
-
-      if (!res.ok) {
-        throw new Error('Server merespons dengan status ' + res.status + ' (' + res.statusText + ').');
-      }
-
-      let data;
-      try {
-        data = await res.json();
-      } catch (parseErr) {
-        throw new Error('Respons server tidak valid (bukan JSON). Cek apakah web app Apps Script masih ter-deploy dengan benar.');
-      }
-
-      if (!data.ok) throw new Error(data.error || 'Gagal memproses di server.');
-      renderResult(data);
-    } catch (err) {
-      statusEl.textContent = 'Gagal: ' + err.message;
-    } finally {
-      runBtn.disabled = false;
-    }
-  });
-
-  function fileToBase64(file) {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result.split(',')[1]);
-      reader.onerror = () => reject(new Error('Gagal membaca file dari disk.'));
-      reader.readAsDataURL(file);
+  const namaTidakKetemu = uniquePdfNames
+    .filter(n => !matchedPdfNamas.has(n))
+    .map(n => {
+      const kemungkinanNamaLengkap = [...allSheetNames].filter(sn => sn.length > n.length && sn.indexOf(n) === 0);
+      return {
+        nama: n,
+        kemungkinanTerpotong: kemungkinanNamaLengkap.length > 0,
+        kemungkinanNamaLengkap: kemungkinanNamaLengkap,
+      };
     });
-  }
 
-  function escapeHtml(str) {
-    return String(str)
-      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;');
-  }
+  // Tabel hasil yang ditampilkan di halaman HANYA baris dari spreadsheet
+  // UTAMA (Checker Nisbah) -- ini yang jadi target/acuan pengecekan.
+  // Spreadsheet KEDUA (Potensi Nisbah) tetap diproses & diwarnai seperti
+  // biasa (lihat secondAgg di atas, angkanya tetap muncul di
+  // summary.secondSheetMatched), tapi baris-barisnya sengaja TIDAK ikut
+  // ditampilkan di tabel hasil supaya tabel tidak bercampur antara
+  // "cocok di Checker Nisbah" dengan "cocok di Potensi Nisbah".
+  const allDetails = mainAgg.details;
+  allDetails.forEach((d, idx) => { d.no = idx + 1; });
 
-  function renderResult(data) {
-    const s = data.summary || {};
-    let text = 'Selesai.\n' +
-      'Baris terbaca dari file: ' + (s.pdfRowsRead != null ? s.pdfRowsRead : '-') + '\n' +
-      'Baris cocok di (Checker Nisbah): ' + (s.mainSheetMatched != null ? s.mainSheetMatched : '-') + '\n' +
-      'Baris cocok di (Potensi Nisbah): ' + (s.secondSheetMatched != null ? s.secondSheetMatched : '-');
-
-    // Ambil daftar sheet
-    let sheets = s.mainSheets || s.processedSheets || [];
-
-    // FILTER: Hanya ambil sheet pertama (karena sheet pertama milik Link Checker Nisbah)
-    if (sheets && sheets.length > 0) {
-      text += '\nSheet yang diproses: ' + sheets[0];
-    }
-
-    statusEl.textContent = text;
-
-    if (data.rows && data.rows.length) {
-      let table = '<div class="table-wrap"><table><thead><tr><th>No</th><th>Nama</th><th>Baris</th><th>Pokok</th><th>Basil</th></tr></thead><tbody>';
-      data.rows.forEach((r, idx) => {
-        let viaNote = '';
-        if (r.matchedVia === '2kata') {
-          viaNote = ' <span style="color:#8a4b12; font-weight:600;" title="Dicocokkan lewat 2 kata pertama (nama di PDF kepotong)">(≈2 kata)</span>';
-        } else if (r.matchedVia === '2kata+angka') {
-          viaNote = ' <span style="color:#8a4b12; font-weight:600;" title="2 kata pertama cocok, dan dipastikan lewat Pokok+Basil karena ada beberapa nama mirip">(≈2 kata + angka)</span>';
-        } else if (r.matchedVia === 'prefix') {
-          viaNote = ' <span style="color:#8a4b12; font-weight:600;" title="Nama di sheet diawali persis oleh nama PDF yang kepotong di tengah kata">(≈potongan nama)</span>';
-        } else if (r.matchedVia === 'prefix+angka') {
-          viaNote = ' <span style="color:#8a4b12; font-weight:600;" title="Awalan nama cocok, dan dipastikan lewat Pokok+Basil karena ada beberapa nama mirip">(≈potongan nama + angka)</span>';
-        }
-        table += '<tr><td class="col-no">' + (idx + 1) + '</td><td>' + escapeHtml(r.nama) + viaNote + '</td><td>' + escapeHtml(r.row) + '</td><td>' +
-          (r.pokokMatch ? '✓' : '') + '</td><td>' + (r.basilMatch ? '✓' : '') + '</td></tr>';
-      });
-      table += '</tbody></table></div>';
-      statusEl.insertAdjacentHTML('beforeend', table);
-    }
-
-    if (data.namaTidakKetemu && data.namaTidakKetemu.length) {
-      let box = '<div class="warn-box">' +
-        '<h4>⚠ ' + data.namaTidakKetemu.length + ' nama dari file tidak ketemu di spreadsheet mana pun</h4>' +
-        '<p>Biasanya karena nama di file kepotong (kolom lebar tetap) sehingga beda persis dari nama lengkap di spreadsheet, atau nasabahnya memang belum ada barisnya.</p>' +
-        '<ul class="warn-list">';
-      data.namaTidakKetemu.forEach(n => {
-        box += '<li><span class="warn-name">' + escapeHtml(n.nama) + '</span>';
-        if (n.kemungkinanTerpotong && n.kemungkinanNamaLengkap.length) {
-          box += '<span class="warn-hint">Kemungkinan nama lengkapnya di spreadsheet: ' +
-            n.kemungkinanNamaLengkap.map(escapeHtml).join(', ') + '</span>';
-        } else {
-          box += '<span class="warn-hint none">Tidak ada nama mirip yang ketemu di spreadsheet — cek manual.</span>';
-        }
-        box += '</li>';
-      });
-      box += '</ul></div>';
-      statusEl.insertAdjacentHTML('beforeend', box);
-    }
-  }
-
-  // --- Show/hide kartu pengaturan link, supaya halaman tidak kepanjangan ---
-  const toggleLinkBtn = document.getElementById('toggleLink');
-  const linkBodyEl = document.getElementById('linkBody');
-  let linkLoaded = false;
-
-  toggleLinkBtn.addEventListener('click', () => {
-    const nowHidden = linkBodyEl.classList.toggle('hidden');
-    toggleLinkBtn.textContent = nowHidden ? 'Tampilkan' : 'Sembunyikan';
-    if (!nowHidden && !linkLoaded) {
-      linkLoaded = true;
-      loadLinkUtama();
-      loadLinkKedua();
-    }
-  });
-
-  async function callWebApp(payload) {
-    const res = await fetchWithTimeout(WEB_APP_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // hindari CORS preflight
-      body: JSON.stringify(payload)
-    }, FETCH_TIMEOUT_MS);
-    return res.json();
-  }
-
-  function renderCurrentLink(el, url) {
-    el.innerHTML =
-      '<div style="margin-bottom:6px;">Sedang dipakai:</div>' +
-      '<div class="link-box">' +
-        '<span class="link-text" title="' + escapeHtml(url) + '">' + escapeHtml(url) + '</span>' +
-        '<a class="link-open" href="' + url + '" target="_blank" rel="noopener">Buka ↗</a>' +
-      '</div>';
-  }
-
-  // --- Link spreadsheet Checker Nisbah (utama) bulan/cabang ini ---
-  const linkUtamaCurrentEl = document.getElementById('linkUtamaCurrent');
-  const linkUtamaInputEl = document.getElementById('linkUtamaInput');
-  const linkUtamaStatusEl = document.getElementById('linkUtamaStatus');
-  const saveLinkUtamaBtn = document.getElementById('saveLinkUtama');
-
-  async function loadLinkUtama() {
-    if (!WEB_APP_URL) { linkUtamaCurrentEl.textContent = 'WEB_APP_URL belum diisi.'; return; }
-    try {
-      const data = await callWebApp({ action: 'getLinkUtama' });
-      if (!data.ok) throw new Error(data.error || 'Gagal mengambil link.');
-      renderCurrentLink(linkUtamaCurrentEl, data.url);
-    } catch (err) {
-      linkUtamaCurrentEl.textContent = 'Gagal memuat link saat ini: ' + err.message;
-    }
-  }
-
-  saveLinkUtamaBtn.addEventListener('click', async () => {
-    const url = linkUtamaInputEl.value.trim();
-    if (!url) { linkUtamaStatusEl.textContent = 'Paste link spreadsheet-nya dulu.'; return; }
-    if (!WEB_APP_URL) { linkUtamaStatusEl.textContent = 'WEB_APP_URL belum diisi.'; return; }
-
-    saveLinkUtamaBtn.disabled = true;
-    linkUtamaStatusEl.textContent = 'Menyimpan...';
-    try {
-      const data = await callWebApp({ action: 'setLinkUtama', url: url });
-      if (!data.ok) throw new Error(data.error || 'Gagal menyimpan link.');
-      linkUtamaStatusEl.textContent = 'Tersimpan. Mulai sekarang pencocokan pakai spreadsheet ini sebagai Checker Nisbah.';
-      linkUtamaInputEl.value = '';
-      loadLinkUtama();
-    } catch (err) {
-      linkUtamaStatusEl.textContent = 'Gagal: ' + err.message;
-    } finally {
-      saveLinkUtamaBtn.disabled = false;
-    }
-  });
-
-  // --- Link spreadsheet Potensi Nisbah bulan/cabang ini ---
-  const linkKeduaCurrentEl = document.getElementById('linkKeduaCurrent');
-  const linkKeduaInputEl = document.getElementById('linkKeduaInput');
-  const linkKeduaStatusEl = document.getElementById('linkKeduaStatus');
-  const saveLinkKeduaBtn = document.getElementById('saveLinkKedua');
-
-  async function loadLinkKedua() {
-    if (!WEB_APP_URL) { linkKeduaCurrentEl.textContent = 'WEB_APP_URL belum diisi.'; return; }
-    try {
-      const data = await callWebApp({ action: 'getLinkKedua' });
-      if (!data.ok) throw new Error(data.error || 'Gagal mengambil link.');
-      renderCurrentLink(linkKeduaCurrentEl, data.url);
-    } catch (err) {
-      linkKeduaCurrentEl.textContent = 'Gagal memuat link saat ini: ' + err.message;
-    }
-  }
-
-  saveLinkKeduaBtn.addEventListener('click', async () => {
-    const url = linkKeduaInputEl.value.trim();
-    if (!url) { linkKeduaStatusEl.textContent = 'Paste link spreadsheet-nya dulu.'; return; }
-    if (!WEB_APP_URL) { linkKeduaStatusEl.textContent = 'WEB_APP_URL belum diisi.'; return; }
-
-    saveLinkKeduaBtn.disabled = true;
-    linkKeduaStatusEl.textContent = 'Menyimpan...';
-    try {
-      const data = await callWebApp({ action: 'setLinkKedua', url: url });
-      if (!data.ok) throw new Error(data.error || 'Gagal menyimpan link.');
-      linkKeduaStatusEl.textContent = 'Tersimpan. Mulai sekarang pencocokan pakai spreadsheet ini sebagai Potensi Nisbah.';
-      linkKeduaInputEl.value = '';
-      loadLinkKedua();
-    } catch (err) {
-      linkKeduaStatusEl.textContent = 'Gagal: ' + err.message;
-    } finally {
-      saveLinkKeduaBtn.disabled = false;
-    }
-  });
-
-  // ============================================================
-  // TAB VIEW: APK Checker <-> KAL AKP (tanpa pindah halaman)
-  // ============================================================
-  function showView(view) {
-    document.getElementById('viewChecker').style.display = (view === 'checker') ? '' : 'none';
-    document.getElementById('viewKalkulator').style.display = (view === 'kalkulator') ? '' : 'none';
-    document.querySelectorAll('nav.menu a[data-tab]').forEach(a => a.classList.remove('aktif'));
-    const activeLink = document.querySelector('nav.menu a[data-tab="' + view + '"]');
-    if (activeLink) activeLink.classList.add('aktif');
-    window.scrollTo({ top: 0, behavior: 'instant' in window ? 'instant' : 'auto' });
-  }
-
-  // ============================================================
-  // KALKULATOR AKP
-  // ============================================================
-  const bulanNamaAkp = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
-  const akpBulanEl = document.getElementById('akpBulan');
-  bulanNamaAkp.forEach((nama, idx) => {
-    const opt = document.createElement('option');
-    opt.value = idx;
-    opt.textContent = nama;
-    akpBulanEl.appendChild(opt);
-  });
-
-  const akpNow = new Date();
-  akpBulanEl.value = akpNow.getMonth();
-  const akpTahunEl = document.getElementById('akpTahun');
-  akpTahunEl.value = akpNow.getFullYear();
-  const akpJmlHariEl = document.getElementById('akpJmlHari');
-
-  // Jumlah hari akurat di bulan tsb (otomatis Feb 28/29 sesuai tahun kabisat),
-  // memakai trik "tanggal 0 bulan berikutnya" = hari terakhir bulan berjalan.
-  function hitungJumlahHariBulan(bulanIndex0, tahun) {
-    return new Date(tahun, bulanIndex0 + 1, 0).getDate();
-  }
-
-  function updateAkpJmlHari() {
-    const bulan = parseInt(akpBulanEl.value, 10);
-    const tahun = parseInt(akpTahunEl.value, 10) || akpNow.getFullYear();
-    const hari = hitungJumlahHariBulan(bulan, tahun);
-    akpJmlHariEl.textContent = hari;
-    refreshLockedNisbah();
-    return hari;
-  }
-  akpBulanEl.addEventListener('change', updateAkpJmlHari);
-  akpTahunEl.addEventListener('input', updateAkpJmlHari);
-  updateAkpJmlHari();
-
-  function formatAngkaID(num) {
-    return new Intl.NumberFormat('id-ID', { maximumFractionDigits: 0 }).format(Math.round(num));
-  }
-
-  const akpBodyEl = document.getElementById('akpBody');
-
-  // Rate harian tetap (hasil analisa: Nisbah 31-harian ÷ 31), dipakai untuk menghitung
-  // Nisbah % bulan berjalan = rate harian × jumlah hari bulan yang dipilih.
-  const AKP_DAILY_RATE = {
-    REG: 0.04184479457531179,
-    PEN: 0.023671232679383217,
-    UNIK: 0.0190684915835492
+  return {
+    summary: {
+      branchDetected: branchSheetName,
+      pdfRowsRead: pdfRecords.length,
+      mainSheetMatched: mainAgg.matchedCount,
+      secondSheetMatched: secondAgg.matchedCount,
+      // PATCH 05-08-2026 (b): berapa dari total match di atas yang sebetulnya
+      // "ketemu by nama doang" (kuning) -- angkanya tidak nyambung sama
+      // sekali, perlu dicek manual.
+      nameOnlyMatched: mainAgg.nameOnlyCount + secondAgg.nameOnlyCount,
+      processedSheets: [].concat(mainAgg.processedSheetNames, secondAgg.processedSheetNames),
+      skippedSheets: [].concat(mainAgg.skippedSheetNames, secondAgg.skippedSheetNames),
+      namaTidakKetemuCount: namaTidakKetemu.length,
+    },
+    rows: allDetails,
+    namaTidakKetemu: namaTidakKetemu,
   };
+}
 
-  function formatRibuan(digitsStr) {
-    if (!digitsStr) return '';
-    return new Intl.NumberFormat('id-ID').format(parseInt(digitsStr, 10));
-  }
+/**
+ * Proses sekumpulan sheet (dari satu spreadsheet) lalu gabungkan hasilnya.
+ * @param {Sheet[]} sheets
+ * @param {Array} pdfRecords
+ * @param {number} [fallbackStartRow] - diteruskan ke matchAndColorSheetObj()
+ */
+function processSheetsGroup(sheets, pdfRecords, fallbackStartRow) {
+  let matchedCount = 0;
+  let nameOnlyCount = 0;
+  let details = [];
+  let allNames = [];
+  let matchedPdfNamas = [];
+  const processedSheetNames = [];
+  const skippedSheetNames = [];
 
-  function attachSaldoFormatter(input) {
-    input.addEventListener('input', () => {
-      const digits = input.value.replace(/[^\d]/g, '');
-      input.value = formatRibuan(digits);
-    });
-  }
-
-  function addAkpRow(nama, saldo, bunga, locked, catKey) {
-    nama = nama || '';
-    saldo = (saldo === undefined) ? 0 : saldo;
-    bunga = (bunga === undefined) ? 0 : bunga;
-
-    const namaAttr = locked ? ' class="akp-nama akp-locked" readonly' : ' class="akp-nama"';
-    const catAttr = (locked && catKey) ? ' data-cat="' + catKey + '"' : '';
-    const bungaAttr = locked ? ' class="akp-bunga akp-locked" readonly' + catAttr : ' class="akp-bunga"';
-    const hapusCell = locked
-      ? '<td style="text-align:center;">-</td>'
-      : '<td style="text-align:center;"><button type="button" class="akp-hapus" title="Hapus baris">✕</button></td>';
-    const saldoDisplay = saldo ? formatRibuan(String(saldo)) : '';
-
-    const tr = document.createElement('tr');
-    tr.innerHTML =
-      '<td><input type="text"' + namaAttr + ' value="' + escapeHtml(nama) + '" placeholder="Kategori"></td>' +
-      '<td><input type="text" inputmode="numeric" class="akp-saldo" value="' + saldoDisplay + '" placeholder="0"></td>' +
-      '<td><input type="number"' + bungaAttr + ' value="' + bunga + '" step="any" placeholder="0"></td>' +
-      '<td class="akp-hasil">-</td>' +
-      hapusCell;
-    akpBodyEl.appendChild(tr);
-    attachSaldoFormatter(tr.querySelector('.akp-saldo'));
-    const hapusBtn = tr.querySelector('.akp-hapus');
-    if (hapusBtn) hapusBtn.addEventListener('click', () => tr.remove());
-  }
-
-  // Hitung ulang Nisbah % baris terkunci (REG/PEN/UNIK) = rate harian × jumlah hari
-  // bulan yang sedang dipilih, supaya Total AKP ikut berubah sesuai jumlah hari.
-  function refreshLockedNisbah() {
-    const hari = parseInt(akpJmlHariEl.textContent, 10) || 0;
-    document.querySelectorAll('.akp-bunga.akp-locked[data-cat]').forEach(el => {
-      const cat = el.getAttribute('data-cat');
-      const dailyRate = AKP_DAILY_RATE[cat];
-      if (dailyRate === undefined) return;
-      el.value = (dailyRate * hari).toFixed(5);
-    });
-  }
-
-  // Baris default mengikuti kategori & rate bulan berjalan (REG/PEN/UNIK).
-  // Kategori dan Nisbah % dipatenkan (readonly, tidak bisa diedit). Nisbah % dihitung
-  // otomatis = rate harian × jumlah hari bulan yang dipilih, sehingga Total AKP ikut
-  // berubah kalau bulan/tahun (jumlah hari) diganti. Hanya kolom Saldo yang bisa diisi
-  // manual. Kategori UMI dihapus permanen.
-  addAkpRow('REG', 0, 0, true, 'REG');
-  addAkpRow('PEN', 0, 0, true, 'PEN');
-  addAkpRow('UNIK', 0, 0, true, 'UNIK');
-  refreshLockedNisbah();
-
-  document.getElementById('akpAddRow').addEventListener('click', () => addAkpRow());
-
-  document.getElementById('akpHitung').addEventListener('click', () => {
-    const rows = akpBodyEl.querySelectorAll('tr');
-    let total = 0;
-    rows.forEach(tr => {
-      const saldoRaw = tr.querySelector('.akp-saldo').value.replace(/[^\d]/g, '');
-      const saldo = parseFloat(saldoRaw) || 0;
-      const bunga = parseFloat(tr.querySelector('.akp-bunga').value) || 0;
-      const hasil = saldo * (bunga / 100);
-      total += hasil;
-      tr.querySelector('.akp-hasil').textContent = formatAngkaID(hasil);
-    });
-    document.getElementById('akpTotalValue').textContent = formatAngkaID(total);
-    document.getElementById('akpTotalBox').style.display = 'block';
+  sheets.forEach(sheet => {
+    const result = matchAndColorSheetObj(sheet, pdfRecords, fallbackStartRow);
+    if (result.skipped) {
+      skippedSheetNames.push(sheet.getName());
+      return;
+    }
+    processedSheetNames.push(sheet.getName());
+    matchedCount += result.matchedCount;
+    nameOnlyCount += result.nameOnlyCount;
+    details = details.concat(result.details);
+    allNames = allNames.concat(result.allNames);
+    matchedPdfNamas = matchedPdfNamas.concat(result.matchedPdfNamas);
   });
 
-  // ============================================================
-  // PATCH 10-08-2026 (a): parsing PDF di BROWSER (bukan lewat server),
-  // supaya tidak lagi bergantung pada konversi PDF->Google Docs yang
-  // sudah terbukti mengacak-acak urutan teks untuk sebagian file.
-  // pdf.js (dari CDN) memberi posisi (x,y) tiap potongan teks, jadi baris
-  // bisa disusun ulang secara akurat: kelompokkan per koordinat Y
-  // (dengan toleransi kecil), lalu urutkan tiap baris berdasarkan X.
-  // Hasilnya teks per baris yang RAPI (No Nomor Tanggal Nama Pokok Basil
-  // ...), lalu diparse dengan parsePdfRowsClient() -- regex sederhana per
-  // baris karena urutannya sudah benar, tidak perlu lagi tebak-tebakan.
-  //
-  // Kalau karena sesuatu hal parsing di browser gagal / tidak dapat baris
-  // sama sekali (mis. PDF hasil scan tanpa teks asli, atau pdf.js gagal
-  // dimuat), otomatis FALLBACK ke jalur lama (upload base64, diproses di
-  // server lewat Apps Script) supaya tetap ada hasil.
-  // ============================================================
+  return { matchedCount, nameOnlyCount, details, allNames, matchedPdfNamas, processedSheetNames, skippedSheetNames };
+}
 
-  async function extractPdfClientSide(file) {
-    const arrayBuffer = await file.arrayBuffer();
-    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-    const allLines = [];
+// ---------------------------------------------------------------------------
+// FILE -> RECORDS (multi-format) -- PATCH 08-08-2026 (a)
+// ---------------------------------------------------------------------------
 
-    for (let p = 1; p <= pdf.numPages; p++) {
-      const page = await pdf.getPage(p);
-      const content = await page.getTextContent();
+/** Ambil ekstensi file (huruf kecil, tanpa titik) dari nama file. */
+function getFileExtension(fileName) {
+  const m = String(fileName || '').match(/\.([a-zA-Z0-9]+)\s*$/);
+  return m ? m[1].toLowerCase() : '';
+}
 
-      const items = content.items
-        .map(it => ({ text: it.str, x: it.transform[4], y: it.transform[5] }))
-        .filter(it => it.text && it.text.trim().length > 0);
+/**
+ * Baca file laporan APAPUN formatnya dan kembalikan {records, rawText}.
+ * records = Array<{nama: string, amounts: number[]}>
+ * rawText = teks mentah (dipakai untuk deteksi cabang & pesan error) --
+ *   untuk format grid (xlsx/csv) ini disusun dari beberapa baris/kolom
+ *   pertama supaya detectBranchSheetName() tetap bisa jalan.
+ */
+function extractRecordsFromFile(base64Data, fileName) {
+  const ext = getFileExtension(fileName);
+  const DOC_LIKE = { pdf: 'application/pdf', doc: 'application/msword',
+    docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' };
+  const IMAGE_LIKE = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png',
+    gif: 'image/gif', bmp: 'image/bmp' };
+  const SHEET_LIKE = { xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    xls: 'application/vnd.ms-excel' };
 
-      // Urutkan dulu top->bottom (y besar ke kecil di sistem koordinat PDF), lalu kiri->kanan.
-      items.sort((a, b) => (b.y - a.y) || (a.x - b.x));
+  let records = [];
+  let rawText = '';
 
-      const Y_TOL = 3; // toleransi piksel PDF supaya teks di baris yang sama tidak kepisah
-      let currentLine = null;
-      const lines = [];
-      items.forEach(it => {
-        if (currentLine && Math.abs(currentLine.y - it.y) <= Y_TOL) {
-          currentLine.items.push(it);
-        } else {
-          currentLine = { y: it.y, items: [it] };
-          lines.push(currentLine);
+  if (DOC_LIKE[ext]) {
+    const result = extractViaGoogleDocs(base64Data, fileName, DOC_LIKE[ext], null);
+    records = result.records;
+    rawText = result.rawText;
+  } else if (IMAGE_LIKE[ext]) {
+    // Gambar/scan -> OCR bahasa Indonesia lewat konversi ke Google Doc.
+    const result = extractViaGoogleDocs(base64Data, fileName, IMAGE_LIKE[ext], 'id');
+    records = result.records;
+    rawText = result.rawText;
+  } else if (SHEET_LIKE[ext]) {
+    const blob = Utilities.newBlob(Utilities.base64Decode(base64Data), SHEET_LIKE[ext], fileName);
+    const resource = { name: 'TEMP_APK_CHECKER_XLSX_' + new Date().getTime(), mimeType: MimeType.GOOGLE_SHEETS };
+    const tempFile = Drive.Files.create(resource, blob);
+    try {
+      const ss = SpreadsheetApp.openById(tempFile.id);
+      ss.getSheets().forEach(sheet => {
+        const grid = sheet.getDataRange().getValues();
+        records = records.concat(parseGridRecords(grid));
+        rawText += gridToSampleText(grid) + '\n';
+      });
+    } finally {
+      Drive.Files.remove(tempFile.id);
+    }
+  } else if (ext === 'csv') {
+    const csvText = Utilities.newBlob(Utilities.base64Decode(base64Data)).getDataAsString('UTF-8');
+    const grid = Utilities.parseCsv(csvText);
+    records = parseGridRecords(grid);
+    rawText = csvText;
+  } else {
+    throw new Error('Format file ".' + (ext || '?') + '" belum didukung. Gunakan PDF, Word (.doc/.docx), ' +
+      'Excel (.xlsx/.xls), CSV, atau foto/scan (JPG/PNG/GIF/BMP).');
+  }
+
+  if (records.length === 0) {
+    throw new Error('Tidak ada baris data yang berhasil dibaca dari file. Cek format filenya. ' +
+      (rawText ? 'Cuplikan teks (500 karakter pertama): ' + rawText.substring(0, 500) : ''));
+  }
+
+  return { records: records, rawText: rawText };
+}
+
+/**
+ * Konversi PDF/Word/gambar ke Google Doc sementara (opsional lewat OCR),
+ * lalu ambil records dari Table (kalau ada) dan dari teks fallback. File
+ * sementara selalu dihapus lagi.
+ * @param {string|null} ocrLanguage - isi mis. 'id' untuk gambar; null kalau
+ *   tidak perlu OCR (PDF/Word yang memang berisi teks asli).
+ */
+function extractViaGoogleDocs(base64Data, fileName, sourceMimeType, ocrLanguage) {
+  const blob = Utilities.newBlob(Utilities.base64Decode(base64Data), sourceMimeType, fileName);
+  const resource = { name: 'TEMP_APK_CHECKER_' + new Date().getTime(), mimeType: MimeType.GOOGLE_DOCS };
+  const optionalArgs = ocrLanguage ? { ocrLanguage: ocrLanguage } : undefined;
+  const tempFile = optionalArgs ? Drive.Files.create(resource, blob, optionalArgs) : Drive.Files.create(resource, blob);
+
+  let rawText = '';
+  let records = [];
+  try {
+    const doc = DocumentApp.openById(tempFile.id);
+    const tables = doc.getBody().getTables();
+
+    let tableRecords = [];
+    tables.forEach(table => { tableRecords = tableRecords.concat(parseGridRecords(gridFromDocTable(table))); });
+
+    rawText = doc.getBody().getText();
+
+    // PATCH 10-08-2026 (d): kalau Google berhasil deteksi struktur TABEL asli
+    // (tableRecords tidak kosong), PAKAI ITU LANGSUNG -- jauh lebih akurat
+    // drpd tebak-tebakan teks lepas. textRecords cuma fallback TERAKHIR.
+    //
+    // PATCH 10-08-2026 (f): untuk kasus textRecords (tableRecords kosong --
+    // Google gagal deteksi tabel sama sekali, TERBUKTI terjadi utk sebagian
+    // gambar laporan meski sudah resolusi tinggi -- lihat catatan panjang di
+    // kepala file), coba dulu parseByNomorAnchor() yang menjangkarkan tiap
+    // baris ke pola "Nomor Pinjaman" (jauh lebih akurat & tidak gampang
+    // "menular" salah pasang antar-baris dibanding parser lama). Kalau
+    // dokumennya tidak punya pola Nomor Pinjaman sama sekali (mis. jenis
+    // laporan lain), baru fallback ke parsePdfTextFallback() lama.
+    const anchorRecords = parseByNomorAnchor(rawText);
+    const textRecords = anchorRecords.length > 0 ? anchorRecords : parsePdfTextFallback(rawText);
+    records = tableRecords.length > 0 ? tableRecords : textRecords;
+  } finally {
+    Drive.Files.remove(tempFile.id);
+  }
+  return { records: records, rawText: rawText };
+}
+
+/** Ambil cuplikan teks dari sebuah grid 2D (dipakai supaya deteksi cabang tetap bisa jalan utk xlsx/csv). */
+function gridToSampleText(grid) {
+  return grid.slice(0, 10).map(row => row.join(' ')).join('\n');
+}
+
+/** Ubah sebuah Table Google Docs jadi array 2D string (baris x kolom). */
+function gridFromDocTable(table) {
+  const grid = [];
+  const numRows = table.getNumRows();
+  for (let r = 0; r < numRows; r++) {
+    const row = [];
+    const numCells = table.getRow(r).getNumCells();
+    for (let c = 0; c < numCells; c++) row.push(table.getCell(r, c).getText());
+    grid.push(row);
+  }
+  return grid;
+}
+
+/**
+ * Cari header NAMA/POKOK/BASIL dalam sebuah grid 2D (dari Table Google Docs,
+ * Google Sheets, atau hasil parseCsv), lalu ambil baris datanya berdasarkan
+ * posisi kolom (bukan urutan) -> aman walau ada kolom kosong.
+ */
+function parseGridRecords(grid) {
+  if (!grid || grid.length < 2) return [];
+
+  let headerRowIdx = -1;
+  let colIndex = { nama: -1, pokok: -1, basil: -1 };
+  const scanLimit = Math.min(grid.length, 30);
+
+  for (let r = 0; r < scanLimit; r++) {
+    const row = grid[r];
+    const idx = { nama: -1, pokok: -1, basil: -1 };
+    for (let c = 0; c < row.length; c++) {
+      const h = normalizeHeader(String(row[c]));
+      if (h === 'NAMA') idx.nama = c;
+      else if (h === 'POKOK') idx.pokok = c;
+      else if (h === 'BASIL') idx.basil = c;
+    }
+    if (idx.nama > -1) { headerRowIdx = r; colIndex = idx; break; }
+  }
+  if (headerRowIdx === -1) return [];
+
+  const records = [];
+  for (let r = headerRowIdx + 1; r < grid.length; r++) {
+    const row = grid[r];
+    if (colIndex.nama >= row.length) continue;
+
+    const namaRaw = String(row[colIndex.nama] || '').trim();
+    if (!namaRaw) continue;
+    if (/^T\s*O\s*T\s*A\s*L$/i.test(namaRaw)) continue; // baris total, bukan nasabah
+
+    const pokokRaw = (colIndex.pokok > -1 && colIndex.pokok < row.length) ? row[colIndex.pokok] : '';
+    const basilRaw = (colIndex.basil > -1 && colIndex.basil < row.length) ? row[colIndex.basil] : '';
+
+    const amounts = [pokokRaw, basilRaw]
+      .map(parseFlexibleNumber)
+      .filter(v => v !== null);
+    if (amounts.length === 0) continue;
+
+    records.push({ nama: normalizeName(namaRaw), amounts: amounts });
+  }
+  return records;
+}
+
+/**
+ * Parse angka yang bisa datang dalam bentuk Number asli (dari sel Google
+ * Sheets) ATAU string format Indonesia ("1.234.567,89") ATAU string kosong.
+ */
+function parseFlexibleNumber(v) {
+  if (v === null || v === undefined) return null;
+  if (typeof v === 'number') return isNaN(v) ? null : v;
+  const s = String(v).trim();
+  if (!s) return null;
+  if (/^-?\d{1,3}(\.\d{3})*(,\d+)?$/.test(s)) return parseIndoNumber(s);
+  const f = parseFloat(s.replace(/[^\d.-]/g, ''));
+  return isNaN(f) ? null : f;
+}
+
+function normalizeHeader(str) {
+  return String(str).replace(/\s+/g, '').trim().toUpperCase();
+}
+
+// ---------------------------------------------------------------------------
+// NOMOR-ANCHOR PARSER (PATCH 10-08-2026 f) -- prioritas utama saat tabel
+// tidak terdeteksi sama sekali oleh Google (tableRecords kosong)
+// ---------------------------------------------------------------------------
+
+/**
+ * Kata-kata label/kolom tabel yang kadang muncul nyempil sendirian di
+ * tengah teks hasil OCR (header yang ikut kebawa). Dipakai baik oleh
+ * parseByNomorAnchor() maupun parsePdfTextFallback() (lama) untuk membuang
+ * kata-kata ini dari calon "nama" -- lihat penjelasan di masing-masing
+ * fungsi kenapa ini perlu.
+ */
+const TABLE_LABEL_WORDS = new Set([
+  'NO', 'NOMOR', 'TANGGAL', 'NAMA', 'POKOK', 'BASIL', 'KIFARAT', 'PPJ',
+  'KE', 'PEMBIAYAAN', 'TOTAL', 'KSPPS', 'ARTHA', 'BAHANA', 'SYARIAH',
+  'LAPORAN', 'MUTASI', 'HARIAN', 'PINJAMAN', 'PERIODE',
+]);
+
+/**
+ * PATCH 10-08-2026 (f): parser BARU, prioritas utama saat Google GAGAL
+ * mendeteksi struktur Tabel dari gambar/dokumen sama sekali (tableRecords
+ * kosong -- kasus TERBUKTI NYATA: 12.jpg & 12.png, laporan RANDUBLATUNG,
+ * JUMLAH TABEL TERDETEKSI selalu 0 meski sudah dicoba JPG maupun PNG
+ * resolusi tinggi). Lihat penjelasan lengkap & analisis kasus nyata di
+ * catatan PATCH 10-08-2026 (f) di kepala file.
+ *
+ * Menjangkarkan SETIAP baris ke pola "Nomor Pinjaman" (format XX-NNNNN,
+ * mis. "26-00003") -- pola ini SELALU muncul PERSIS 1x per baris data
+ * (bukan header/total), dan TETAP terbaca benar oleh regex meskipun ada
+ * karakter nyasar nempel di depannya (mis. OCR yang salah baca jadi
+ * "626-00162" -- regex \d{2}-\d{5} tetap match "26-00162" dgn benar karena
+ * regex boleh mulai match dari posisi manapun dalam string, tidak harus
+ * dari awal). Ini jauh lebih bisa diandalkan sbg penanda batas antar-baris
+ * dibanding newline/urutan baca OCR yang gampang kacau.
+ *
+ * Untuk SETIAP baris (segmen teks antara 2 Nomor Pinjaman berurutan),
+ * diambil nama & SEMUA angka uang yang MUNCUL DI DALAM SEGMEN ITU SAJA --
+ * bukan dari tebakan lintas-baris seperti parser lama (parsePdfTextFallback).
+ *
+ * KETERBATASAN YANG DIKETAHUI (disengaja, demi keamanan): kalau ada kata
+ * label tabel (Pokok/Basil/Kifarat/dst) ikut nyempil DI DALAM segmen suatu
+ * baris, itu tanda blok header OCR ikut kebawa ke situ -- kemungkinan besar
+ * angka di segmen itu bukan cuma milik baris ini sendiri (lihat contoh
+ * kasus baris 1-3 di 12.png: angka SUKARJI/NURYATI/MUDLOFAR sempat
+ * tergabung jadi satu blok berdempetan dengan teks header "Pokok Basil
+ * Kifarat Ppj Ke Pembiayaan"). Untuk kasus begini, parser TIDAK MENEBAK --
+ * nama tetap dicatat, TAPI TANPA angka (amounts: []). Baris seperti ini
+ * akan tetap "ketemu by nama" di sheet (kuning, PATCH 05-08-2026 b) yang
+ * memang perlu dicek manual -- jauh lebih aman drpd angka SALAH PASANG ke
+ * nasabah lain seperti yang terjadi sebelum patch ini.
+ *
+ * @param {string} text - rawText hasil ekstraksi (doc.getBody().getText())
+ * @returns {Array<{nama: string, amounts: number[]}>} array kosong kalau
+ *   pola Nomor Pinjaman sama sekali tidak ditemukan (berarti dokumen ini
+ *   bukan format laporan mutasi standar -- caller akan fallback ke
+ *   parsePdfTextFallback() lama).
+ */
+function parseByNomorAnchor(text) {
+  const str = String(text || '');
+  const NOMOR_RE = /\d{2}-\d{5}/g;
+  const anchors = [];
+  let m;
+  while ((m = NOMOR_RE.exec(str)) !== null) {
+    anchors.push({ start: m.index, end: m.index + m[0].length });
+  }
+  if (anchors.length < 2) return []; // terlalu sedikit anchor, jangan dipaksa
+
+  const DATE_RE = /\d{2}-\d{2}-\d{4}/;
+  const MONEY_RE = /-?\d{1,3}(?:[.,]\s?\d{3})*[.,]\s?\d{2}\b/g;
+  const TOTAL_RE = /T\s*O\s*T\s*A\s*L/i;
+  const HEADER_BLEED_RE = /\bPokok\b|\bBasil\b|\bKifarat\b|\bPembiayaan\b|\bPpj\b/i;
+
+  const records = [];
+
+  for (let i = 0; i < anchors.length; i++) {
+    const segStart = anchors[i].end;
+    const segEndRaw = (i + 1 < anchors.length) ? anchors[i + 1].start : str.length;
+    let segment = str.substring(segStart, segEndRaw);
+
+    // Potong segmen di kata "TOTAL" kalau ada -- ini terjadi utk baris data
+    // TERAKHIR (tidak ada Nomor Pinjaman lagi setelahnya utk jadi batas),
+    // supaya angka GRAND TOTAL di baris ringkasan tidak ikut ke-anggap milik
+    // baris data terakhir (lihat kasus nyata: SUTRISNO di 12.png).
+    const totalIdx = segment.search(TOTAL_RE);
+    if (totalIdx > -1) segment = segment.substring(0, totalIdx);
+
+    const dateMatch = segment.match(DATE_RE);
+    if (!dateMatch) continue; // tidak ada tanggal -> bukan baris data yang valid
+
+    const afterDate = segment.substring(dateMatch.index + dateMatch[0].length);
+    const moneyMatches = afterDate.match(MONEY_RE) || [];
+    const firstMoneyIdx = moneyMatches.length ? afterDate.search(MONEY_RE) : afterDate.length;
+
+    let namaWords = afterDate.substring(0, firstMoneyIdx)
+      .replace(/[^A-Za-z'.\s]/g, ' ')
+      .split(/\s+/)
+      .map(w => w.trim())
+      .filter(Boolean);
+    // Buang kata label tabel yg nyempil di dalam calon nama (mis. "TOTAL"
+    // ikut nempel ke nama baris data terakhir sebelum kata TOTAL-nya sendiri
+    // ketemu -- lihat kasus SUTRISNO TOTAL di 12.png).
+    namaWords = namaWords.filter(w => !TABLE_LABEL_WORDS.has(w.toUpperCase()));
+    const namaRaw = namaWords.join(' ').trim();
+    if (!namaRaw || namaRaw.length < 2) continue;
+
+    // Kalau ADA kata label tabel (Pokok/Basil/dst) masih nyempil DI DALAM
+    // segmen ini (bukan cuma di calon nama, tapi di mana saja dalam
+    // segmen), itu tanda blok header OCR ikut kebawa -- JANGAN tebak
+    // angkanya, lihat catatan keterbatasan di komentar fungsi ini.
+    const hasHeaderBleed = HEADER_BLEED_RE.test(segment);
+
+    const amounts = hasHeaderBleed
+      ? []
+      : moneyMatches.map(parseFlexibleMoneyToken).filter(v => v !== null && Math.abs(v) > 0.005);
+
+    records.push({ nama: normalizeName(namaRaw), amounts: amounts });
+  }
+
+  return records;
+}
+
+// ---------------------------------------------------------------------------
+// TEKS BEBAS (fallback LAMA) -> RECORDS -- PATCH 08-08-2026 (b)
+// ---------------------------------------------------------------------------
+
+/**
+ * Parser baris-per-baris yang TIDAK mengasumsikan urutan baca rapi. SEKARANG
+ * hanya dipakai sebagai fallback TERAKHIR kalau parseByNomorAnchor() di atas
+ * tidak menemukan pola Nomor Pinjaman sama sekali (dokumen bukan format
+ * laporan mutasi standar) DAN Google juga tidak berhasil mendeteksi Tabel
+ * (lihat PATCH 10-08-2026 (d) & (f) di extractViaGoogleDocs()).
+ */
+function parsePdfTextFallback(text) {
+  const lines = String(text).split(/\n+/).map(l => l.trim()).filter(l => l.length > 0);
+
+  const HEADER_LINE_PATTERNS = [
+    /^KSPPS/i,
+    /LAPORAN\s+MUTASI/i,
+    /^MUTASI\s+PERIODE/i,
+    /^NO\.?\s*NOMOR\s*TANGGAL/i,
+    /^N\s*A\s*M\s*A\s*$/i,
+    /^KIFARAT\s*PPJ/i,
+    /^PEMBIAYAAN$/i,
+    /^T\s*O\s*T\s*A\s*L$/i,
+    /^[-_|]+$/,
+  ];
+
+  // PATCH 10-08-2026: kata-kata label/kolom yang kadang muncul SENDIRIAN
+  // di satu baris (terutama hasil OCR gambar, yang kerap memecah header
+  // tabel jadi satu kata per baris alih-alih satu baris gabungan seperti
+  // di teks PDF biasa). Kalau SEMUA kata di sebuah baris (setelah dibuang
+  // angka/tanggalnya) ada di daftar ini, baris itu bukan nama nasabah --
+  // dibuang, bukan disisihkan sebagai nama. Ini yang memperbaiki kasus
+  // "POKOK", "BASIL", "KIFARAT", "PPJ" ikut kebaca sebagai nama nasabah.
+  const LABEL_WORDS = TABLE_LABEL_WORDS;
+
+  // PATCH 10-08-2026: pola uang dilonggarkan supaya tahan kuirk OCR --
+  // dulu HANYA menerima format Indonesia ketat ("575.000,00": titik ribuan,
+  // koma desimal). Sekarang menerima koma ATAU titik sebagai pemisah
+  // ribuan/desimal, dan spasi nyasar di sekitar pemisah (mis. OCR yang
+  // salah baca "575.000,00" jadi "575.000.00" atau "575 . 000,00").
+  const moneyRe = /-?\d{1,3}(?:[.,]\s?\d{3})*[.,]\s?\d{2}\b/g;
+  const dateRe = /\d{2}-\d{2}-\d{4}/g;
+  const nomorRe = /\b\d+[\-\/]\d+\b/g;
+
+  const records = [];
+  const pendingNames = [];
+  const pendingMoneyGroups = []; // Array<number[]>
+
+  lines.forEach(line => {
+    if (HEADER_LINE_PATTERNS.some(p => p.test(line))) return;
+
+    const moneyMatches = line.match(moneyRe) || [];
+    const moneys = moneyMatches.map(parseFlexibleMoneyToken).filter(v => v !== null && Math.abs(v) > 0.005);
+
+    let rest = line.replace(moneyRe, ' ');
+    rest = rest.replace(dateRe, ' ');
+    rest = rest.replace(nomorRe, ' ');
+    rest = rest.replace(/\b\d+\b/g, ' ');
+    // PATCH 10-08-2026 (b): buang SEMUA tanda baca/simbol sisa (=, |, titik
+    // nyasar, dsb -- kerap muncul dari OCR gambar yang salah baca garis
+    // tabel jadi karakter), sisakan cuma huruf & spasi. Tanpa ini, sisa
+    // tanda baca bikin baris header yang sebenarnya cuma berisi kata label
+    // (mis. ". Nomor Tanggal") lolos dari filter LABEL_WORDS di bawah,
+    // karena tanda bacanya dihitung sebagai "kata" tersendiri yang bukan
+    // label -- lihat kasus nyata dari OCR 12.jpg.
+    rest = rest.replace(/[^A-Za-z\s]/g, ' ');
+    rest = rest.replace(/\s+/g, ' ').trim();
+
+    // Buang baris yang cuma berisi kata label tabel (lihat LABEL_WORDS di atas).
+    const restWords = rest.length ? rest.split(' ') : [];
+    const isLabelOnly = restWords.length > 0 && restWords.every(w => LABEL_WORDS.has(w.toUpperCase()));
+
+    const nama = (!isLabelOnly && rest.length >= 3) ? normalizeName(rest) : '';
+
+    if (nama && moneys.length) {
+      records.push({ nama: nama, amounts: moneys });
+    } else if (nama) {
+      pendingNames.push(nama);
+    } else if (moneys.length) {
+      pendingMoneyGroups.push(moneys);
+    }
+  });
+
+  // Buang SATU grup uang yang nilainya = jumlah semua angka lain (baris TOTAL
+  // yang lolos dari filter HEADER_LINE_PATTERNS karena angkanya nyempil di
+  // baris terpisah dari kata "TOTAL"-nya sendiri).
+  removeGrandTotalGroup(records, pendingMoneyGroups);
+
+  // Cocokkan sisa nama <-> sisa grup uang berdasarkan urutan kemunculan
+  // (eliminasi) -- lihat penjelasan & pembuktian manual di PATCH 08-08-2026 (b).
+  const n = Math.min(pendingNames.length, pendingMoneyGroups.length);
+  for (let i = 0; i < n; i++) {
+    records.push({ nama: pendingNames[i], amounts: pendingMoneyGroups[i] });
+  }
+  // Nama tersisa tanpa pasangan uang tetap dicatat (amounts kosong) supaya
+  // minimal namanya tidak hilang total dari daftar (tidak akan pernah cocok
+  // angka, tapi tetap terlihat kalau perlu dicek manual).
+  for (let i = n; i < pendingNames.length; i++) {
+    records.push({ nama: pendingNames[i], amounts: [] });
+  }
+
+  return records;
+}
+
+/** Cari & buang 1 grup uang beranggota 1 nilai yang = jumlah semua angka lainnya (baris TOTAL). */
+function removeGrandTotalGroup(records, pendingMoneyGroups) {
+  const sumAllExcept = (excludeIdx) => {
+    let s = 0;
+    records.forEach(r => r.amounts.forEach(a => { s += a; }));
+    pendingMoneyGroups.forEach((g, idx) => {
+      if (idx === excludeIdx) return;
+      g.forEach(a => { s += a; });
+    });
+    return s;
+  };
+  for (let i = 0; i < pendingMoneyGroups.length; i++) {
+    const g = pendingMoneyGroups[i];
+    if (g.length === 1) {
+      const total = sumAllExcept(i);
+      if (total > 0 && Math.abs(g[0] - total) <= 1) {
+        pendingMoneyGroups.splice(i, 1);
+        return;
+      }
+    }
+  }
+}
+
+function parseIndoNumber(str) {
+  return parseFloat(String(str).replace(/\./g, '').replace(',', '.'));
+}
+
+/**
+ * PATCH 10-08-2026: parse token uang yang formatnya bisa sedikit "kotor"
+ * (hasil OCR) -- pemisah ribuan/desimal bisa koma ATAU titik, dan bisa ada
+ * spasi nyasar di sekitarnya. Aturannya: 2 digit TERAKHIR selalu dianggap
+ * desimal (apapun karakter pemisahnya), sisanya di depan dianggap ribuan
+ * (semua titik/koma/spasi di situ dibuang). Contoh yang semuanya
+ * menghasilkan 575000: "575.000,00", "575,000.00", "575.000.00", "575 000,00".
+ */
+function parseFlexibleMoneyToken(token) {
+  const s = String(token).replace(/\s+/g, '');
+  const m = s.match(/^(-?[\d.,]*?)[.,](\d{2})$/);
+  if (!m) return null;
+  const intPart = m[1].replace(/[.,]/g, '');
+  const decPart = m[2];
+  if (!intPart) return null;
+  const val = parseFloat(intPart + '.' + decPart);
+  return isNaN(val) ? null : val;
+}
+
+function normalizeName(str) {
+  return String(str).trim().toUpperCase().replace(/\s+/g, ' ');
+}
+
+function numbersMatch(a, b) {
+  if (a === null || b === null || isNaN(a) || isNaN(b)) return false;
+  return Math.abs(a - b) <= CONFIG.NUMBER_TOLERANCE;
+}
+
+/** Panjang prefix yang sama persis antara 2 string. */
+function longestCommonPrefixLength(a, b) {
+  const len = Math.min(a.length, b.length);
+  let i = 0;
+  while (i < len && a[i] === b[i]) i++;
+  return i;
+}
+
+/**
+ * Pilih SATU kandidat nama dari laporan dari beberapa kandidat yang ambigu
+ * untuk satu baris sheet. Dua tahap:
+ *   1) Coba bedakan pakai ANGKA (pokok/basil) -- menang kalau skornya
+ *      unik tertinggi (cukup salah satu pokok ATAU basil yang cocok, tidak
+ *      harus dua-duanya).
+ *   2) Kalau angka tidak bisa membedakan (semua skor 0, atau masih seri),
+ *      bedakan pakai KEMIRIPAN NAMA -- kandidat dengan potongan awal (prefix)
+ *      paling panjang & sama persis dengan nama di sheet yang menang.
+ * Kalau tetap seri di kedua tahap -> null (terlalu berisiko ditebak).
+ */
+function resolveAmbiguousCandidate(candidateList, pdfByName, saldoAwal, potBasil, nama) {
+  let pool = candidateList;
+
+  const scored = pool.map(c => {
+    const amts = pdfByName[c];
+    const pokokOk = amts.some(v => numbersMatch(v, saldoAwal));
+    const basilOk = amts.some(v => numbersMatch(v, potBasil));
+    return { c, score: (pokokOk ? 1 : 0) + (basilOk ? 1 : 0) };
+  });
+  const maxScore = Math.max(...scored.map(s => s.score));
+  if (maxScore > 0) {
+    const winners = scored.filter(s => s.score === maxScore);
+    if (winners.length === 1) return { nama: winners[0].c, via: 'angka' };
+    pool = winners.map(w => w.c); // masih seri di angka -> persempit lalu lanjut ke tahap nama
+  }
+
+  const byPrefix = pool.map(c => ({ c, len: longestCommonPrefixLength(c, nama) }));
+  const maxLen = Math.max(...byPrefix.map(p => p.len));
+  const prefixWinners = byPrefix.filter(p => p.len === maxLen);
+  return prefixWinners.length === 1 ? { nama: prefixWinners[0].c, via: 'nama' } : null;
+}
+
+// ---------------------------------------------------------------------------
+// PENCOCOKAN + PEWARNAAN SHEET
+// ---------------------------------------------------------------------------
+
+/** Semua sheet/tab yang ada di sebuah spreadsheet -- diproses satu per satu. */
+function getAllSheetsIn(spreadsheetId) {
+  return SpreadsheetApp.openById(spreadsheetId).getSheets();
+}
+
+/**
+ * Cari baris pertama yang berisi header "NAMA" di kolom NAMA, data mulai
+ * satu baris setelah itu.
+ * @param {Sheet} sheet
+ * @param {number} [fallbackRow] - dipakai kalau header tidak ketemu. Kalau
+ *   TIDAK diisi dan header tidak ketemu -> return null (sheet dianggap
+ *   bukan sheet data mutasi, jadi dilewati).
+ */
+function findDataStartRow(sheet, fallbackRow) {
+  const lastRow = Math.min(sheet.getLastRow(), 30);
+  if (lastRow < 1) return fallbackRow !== undefined ? fallbackRow : null;
+  const colValues = sheet.getRange(1, CONFIG.COL_NAMA, lastRow, 1).getValues();
+  for (let i = 0; i < colValues.length; i++) {
+    const v = String(colValues[i][0]).trim().toUpperCase();
+    if (v === 'N A M A' || v === 'NAMA') return i + 2; // baris setelah header
+  }
+  return fallbackRow !== undefined ? fallbackRow : null;
+}
+
+/**
+ * @param {Sheet} sheet - objek sheet Google Sheets
+ * @param {Array} pdfRecords
+ * @param {number} [fallbackStartRow] - lihat findDataStartRow(). Diisi untuk
+ *   sheet-sheet di spreadsheet kedua (Potensi Nisbah, template sudah dikenal
+ *   pasti mulai baris 9), TIDAK diisi saat loop semua sheet di spreadsheet
+ *   utama (supaya sheet non-data otomatis di-skip).
+ */
+function matchAndColorSheetObj(sheet, pdfRecords, fallbackStartRow) {
+  const startRow = findDataStartRow(sheet, fallbackStartRow);
+  if (startRow === null) {
+    return { skipped: true, sheetName: sheet.getName(), matchedCount: 0, nameOnlyCount: 0, details: [], allNames: [], matchedPdfNamas: [] };
+  }
+
+  const lastRow = sheet.getLastRow();
+  if (lastRow < startRow) {
+    return { skipped: false, sheetName: sheet.getName(), matchedCount: 0, nameOnlyCount: 0, details: [], allNames: [], matchedPdfNamas: [] };
+  }
+
+  const numRows = lastRow - startRow + 1;
+  const values = sheet.getRange(startRow, CONFIG.COL_NAMA, numRows, CONFIG.COL_POT_BASIL - CONFIG.COL_NAMA + 1).getValues();
+
+  // Index PDF records by nama untuk pencarian cepat.
+  const pdfByName = {};
+  pdfRecords.forEach(r => {
+    if (!pdfByName[r.nama]) pdfByName[r.nama] = [];
+    pdfByName[r.nama] = pdfByName[r.nama].concat(r.amounts);
+  });
+
+  // Index CADANGAN berdasarkan 2 KATA PERTAMA nama.
+  const pdfByFirstTwoWords = {};
+  Object.keys(pdfByName).forEach(pdfNama => {
+    const key = firstTwoWords(pdfNama);
+    if (!pdfByFirstTwoWords[key]) pdfByFirstTwoWords[key] = new Set();
+    pdfByFirstTwoWords[key].add(pdfNama);
+  });
+
+  const allPdfNamas = Object.keys(pdfByName).sort((a, b) => b.length - a.length);
+
+  const allNames = [];
+
+  // PATCH 05-08-2026 (d): dulu tiap baris sheet langsung diwarnai begitu
+  // ketemu kandidat laporannya (single-pass). Masalahnya: kalau ada
+  // BEBERAPA baris di sheet YANG SAMA dengan nama PERSIS SAMA (mis. 2 baris
+  // "SUYATMAN" di tab RANDU -- baris 62 & baris 535), laporan cuma punya
+  // SATU record untuk nama itu, tapi kode lama mencocokkan record itu ke
+  // MASING-MASING baris secara independen -- baris yang angkanya benar2
+  // cocok diwarnai hijau/cyan, TAPI baris lain yang cuma kebetulan namanya
+  // sama ikut diwarnai kuning ("opsi B") walau angkanya sama sekali tidak
+  // nyambung. Sekarang jadi 2 tahap:
+  //   PASS 1: resolve kandidat laporan utk SETIAP baris (logikanya SAMA
+  //   seperti sebelumnya -- exact/2kata/prefix/resolveAmbiguousCandidate),
+  //   tapi belum diwarnai, cuma dikumpulkan ke rowResults.
+  //   PASS 2: kelompokkan rowResults per NAMA PERSIS SAMA. Kalau dalam satu
+  //   grup nama ADA baris yang angkanya benar2 cocok (pokok/basil) -> HANYA
+  //   baris itu yang diwarnai hijau/cyan; baris senama lain yang angkanya
+  //   TIDAK cocok TIDAK diwarnai sama sekali (bukan kuning lagi, karena
+  //   laporan-nya sudah "dipakai" oleh baris yang benar2 cocok). Kalau
+  //   SEMUA baris dalam grup nama itu angkanya tidak ada yang cocok -> baru
+  //   semuanya diwarnai kuning (opsi B, spt kasus Thomas).
+  const rowResults = [];
+
+  for (let i = 0; i < values.length; i++) {
+    const row = values[i];
+    const nama = normalizeName(row[0]);           // kolom B (offset 0)
+    const saldoAwal = row[CONFIG.COL_SALDO_AWAL - CONFIG.COL_NAMA];
+    const potBasil = row[CONFIG.COL_POT_BASIL - CONFIG.COL_NAMA];
+
+    if (!nama) continue;
+    allNames.push(nama);
+
+    let amounts = pdfByName[nama];
+    let matchedVia = amounts ? 'exact' : null;
+    let sourcePdfNama = amounts ? nama : null;
+
+    if (!amounts) {
+      const candidates = pdfByFirstTwoWords[firstTwoWords(nama)];
+      if (candidates && candidates.size === 1) {
+        sourcePdfNama = [...candidates][0];
+        amounts = pdfByName[sourcePdfNama];
+        matchedVia = '2kata';
+      } else if (candidates && candidates.size > 1) {
+        const best = resolveAmbiguousCandidate([...candidates], pdfByName, saldoAwal, potBasil, nama);
+        if (best) {
+          sourcePdfNama = best.nama;
+          amounts = pdfByName[best.nama];
+          matchedVia = '2kata+' + best.via;
         }
-      });
-
-      lines.forEach(line => {
-        line.items.sort((a, b) => a.x - b.x);
-        const text = line.items.map(i => i.text).join(' ').replace(/\s+/g, ' ').trim();
-        if (text) allLines.push(text);
-      });
+      }
     }
 
-    const rawText = allLines.join('\n');
-    const records = parsePdfRowsClient(rawText);
-    return { rawText, records };
+    if (!amounts) {
+      const prefixCandidates = allPdfNamas.filter(pn =>
+        pn.length >= 6 && pn.split(' ').length >= 2 && nama.indexOf(pn) === 0
+      );
+      if (prefixCandidates.length === 1) {
+        sourcePdfNama = prefixCandidates[0];
+        amounts = pdfByName[sourcePdfNama];
+        matchedVia = 'prefix';
+      } else if (prefixCandidates.length > 1) {
+        const best = resolveAmbiguousCandidate(prefixCandidates, pdfByName, saldoAwal, potBasil, nama);
+        if (best) {
+          sourcePdfNama = best.nama;
+          amounts = pdfByName[best.nama];
+          matchedVia = 'prefix+' + best.via;
+        }
+      }
+    }
+
+    if (!amounts || amounts.length === 0) continue;
+
+    const pokokMatch = amounts.some(v => numbersMatch(v, saldoAwal));
+    const basilMatch = amounts.some(v => numbersMatch(v, potBasil));
+
+    rowResults.push({
+      sheetRow: startRow + i,
+      nama: nama,
+      sourcePdfNama: sourcePdfNama,
+      matchedVia: matchedVia,
+      pokokMatch: pokokMatch,
+      basilMatch: basilMatch,
+    });
   }
 
-  /**
-   * Parser baris-per-baris untuk teks PDF yang SUDAH tersusun rapi (hasil
-   * extractPdfClientSide di atas). Formatnya konsisten:
-   *   No Nomor Tanggal Nama [Pokok] Basil [Kifarat] [Ppj] [Ke] [Pembiayaan]
-   * Karena urutannya sudah benar, cukup regex per baris -- tidak perlu
-   * algoritma eliminasi seperti fallback server.
-   */
-  function parsePdfRowsClient(rawText) {
-    const lines = rawText.split(/\n+/).map(l => l.trim()).filter(Boolean);
-    const rowRe = /^(\d+)\s+([\w.\/-]+)\s+(\d{2}-\d{2}-\d{4})\s+(.+)$/;
-    const moneyRe = /-?\d{1,3}(?:\.\d{3})*,\d{2}/g;
-    const records = [];
+  // PASS 2 -- kelompokkan per nama PERSIS SAMA, lalu putuskan pewarnaan.
+  const groups = {};
+  rowResults.forEach(r => {
+    if (!groups[r.nama]) groups[r.nama] = [];
+    groups[r.nama].push(r);
+  });
 
-    lines.forEach(line => {
-      const m = line.match(rowRe);
-      if (!m) return; // baris header/footer/total tidak diawali "No" -> otomatis dilewati
+  const details = [];
+  let matchedCount = 0;
+  let nameOnlyCount = 0;
+  const matchedPdfNamas = new Set();
 
-      const rest = m[4];
-      const firstDigitIdx = rest.search(/\d/);
-      const nama = (firstDigitIdx > -1 ? rest.substring(0, firstDigitIdx) : rest)
-        .replace(/\s+/g, ' ').trim();
-      if (!nama) return;
+  Object.keys(groups).forEach(nama => {
+    const group = groups[nama];
+    const hasNumberMatchInGroup = group.some(r => r.pokokMatch || r.basilMatch);
 
-      const moneyMatches = rest.match(moneyRe) || [];
-      const amounts = moneyMatches
-        .map(s => parseFloat(s.replace(/\./g, '').replace(',', '.')))
-        .filter(v => !isNaN(v) && Math.abs(v) > 0.005);
+    group.forEach(r => {
+      let color;
+      let nameOnly = false;
+      let matchedVia = r.matchedVia;
 
-      records.push({ nama: nama.toUpperCase(), amounts: amounts });
+      if (r.pokokMatch || r.basilMatch) {
+        color = (r.pokokMatch && r.basilMatch) ? CONFIG.BOTH_MATCH_COLOR
+          : (r.basilMatch ? CONFIG.COLOR_BASIL : CONFIG.COLOR_POKOK);
+      } else if (!hasNumberMatchInGroup) {
+        // PATCH 05-08-2026 (b): tidak ada SATU PUN baris di grup nama ini
+        // yang angkanya cocok -> tetap dianggap ketemu by nama (opsi B),
+        // diwarnai kuning supaya jelas perlu dicek manual.
+        color = CONFIG.COLOR_NAME_ONLY;
+        nameOnly = true;
+        matchedVia = matchedVia + '-tanpaAngka';
+      } else {
+        // PATCH 05-08-2026 (d): ADA saudara senama lain di grup ini yang
+        // angkanya benar-benar cocok -> baris ini (yang angkanya TIDAK
+        // cocok) dianggap BUKAN baris yang dimaksud laporan. Tidak
+        // diwarnai, tidak dihitung sama sekali -- prioritas mutlak untuk
+        // baris yang confirmed oleh angka.
+        return;
+      }
+
+      sheet.getRange(r.sheetRow, CONFIG.COLOR_COL_START, 1, CONFIG.COLOR_COL_END - CONFIG.COLOR_COL_START + 1)
+        .setBackground(color);
+
+      matchedCount++;
+      if (nameOnly) nameOnlyCount++;
+      matchedPdfNamas.add(r.sourcePdfNama);
+      details.push({
+        nama: r.nama, row: r.sheetRow, sheet: sheet.getName(),
+        pokokMatch: r.pokokMatch, basilMatch: r.basilMatch, color: color, matchedVia: matchedVia, nameOnly: nameOnly
+      });
+    });
+  });
+
+  return { skipped: false, sheetName: sheet.getName(), matchedCount: matchedCount, nameOnlyCount: nameOnlyCount, details: details, allNames: allNames, matchedPdfNamas: [...matchedPdfNamas] };
+}
+
+/** Ambil 2 kata pertama dari sebuah nama (dipakai untuk fallback pencocokan nama kepotong). */
+function firstTwoWords(name) {
+  return String(name).trim().split(/\s+/).slice(0, 2).join(' ');
+}
+
+/**
+ * PATCH 05-08-2026 (c): baca nama cabang dari judul laporan (baris
+ * 'KSPPS. "ARTHA BAHANA SYARIAH" <NAMA CABANG>' -- selalu ada di ~300
+ * karakter pertama teks hasil ekstraksi), lalu cocokkan ke
+ * CONFIG.BRANCH_MAP untuk dapat nama TAB yang sesuai.
+ * @param {string} rawText - teks mentah hasil ekstraksi file
+ * @returns {string|null} nama tab (mis. 'RANDU') atau null kalau tidak
+ *   dikenali (berarti CONFIG.BRANCH_MAP perlu ditambah entri baru).
+ */
+function detectBranchSheetName(rawText) {
+  const headerArea = String(rawText || '').substring(0, 300);
+  for (const entry of CONFIG.BRANCH_MAP) {
+    if (entry.pattern.test(headerArea)) return entry.sheetName;
+  }
+  return null;
+}
+
+/**
+ * Cocokkan nama tab sheet sebenarnya (mis. "RANDU", atau kalau ada varian
+ * seperti "RANDU (2)") terhadap nama cabang hasil deteksi. Pakai
+ * startsWith supaya toleran terhadap sufiks kecil, tapi tetap ketat di
+ * awal nama supaya tidak salah nyantol ke tab lain.
+ */
+function sheetNameMatchesBranch(sheetTabName, branchSheetName) {
+  return String(sheetTabName).trim().toUpperCase().indexOf(String(branchSheetName).trim().toUpperCase()) === 0;
+}
+
+// ---------------------------------------------------------------------------
+// GANTI LINK SPREADSHEET UTAMA (CHECKER NISBAH) -- LEWAT SINI
+// ---------------------------------------------------------------------------
+/**
+ * Cara pakai kalau spreadsheet "Checker Nisbah" berganti (mis. pindah cabang):
+ *   1. Buka spreadsheet-nya, COPY seluruh URL dari address bar browser
+ *      (cukup link spreadsheet-nya, tidak perlu buka tab/sheet tertentu --
+ *      SEMUA sheet di dalamnya otomatis diproses).
+ *   2. TEMPEL (ganti) nilai URL_CHECKER_NISBAH di bawah ini dengan URL yang baru.
+ *   3. Di editor Apps Script, pilih fungsi "GANTI_LINK_UTAMA" di dropdown
+ *      run, lalu klik Run.
+ *   4. Selesai. TIDAK PERLU Deploy > Manage deployments > New version.
+ *
+ *  (Cara ini alternatif manual -- cara normalnya cukup paste link lewat
+ *  tombol "Simpan" di bagian "Link Checker Nisbah" pada halaman APK Checker,
+ *  tanpa buka Apps Script sama sekali.)
+ */
+function GANTI_LINK_UTAMA() {
+  const URL_CHECKER_NISBAH = 'https://docs.google.com/spreadsheets/d/1uG51BxqICRe4uR9taldRSxiW7uWFPeyksNOzys8nL08/edit?usp=sharing';
+  const saved = saveSpreadsheetUtamaLink(URL_CHECKER_NISBAH);
+  Logger.log('Tersimpan. Spreadsheet utama sekarang: ID=%s', saved.id);
+}
+
+/** Jalankan ini kapan saja untuk cek link spreadsheet UTAMA yang SEDANG aktif dipakai. */
+function CEK_LINK_SPREADSHEET_UTAMA_SAAT_INI() {
+  Logger.log('Sedang dipakai -> %s', currentSpreadsheetUtamaUrl());
+}
+
+// ---------------------------------------------------------------------------
+// GANTI LINK SPREADSHEET KEDUA (POTENSI NISBAH) SETIAP BULAN -- LEWAT SINI
+// ---------------------------------------------------------------------------
+/**
+ * Cara pakai TIAP BULAN kalau spreadsheet "Potensi Nisbah" berganti:
+ *   1. Buka spreadsheet bulan itu, COPY seluruh URL dari address bar browser
+ *      (cukup link spreadsheet-nya, tidak perlu buka tab/sheet tertentu --
+ *      SEMUA sheet di dalamnya otomatis diproses).
+ *   2. TEMPEL (ganti) nilai URL_BULAN_INI di bawah ini dengan URL yang baru.
+ *   3. Di editor Apps Script, pilih fungsi "GANTI_LINK_BULANAN" di dropdown
+ *      run, lalu klik Run.
+ *   4. Selesai. TIDAK PERLU Deploy > Manage deployments > New version.
+ *
+ *  (Cara ini alternatif manual -- cara normalnya cukup paste link lewat
+ *  tombol "Simpan" di bagian "Link Potensi Nisbah" pada halaman APK Checker,
+ *  tanpa buka Apps Script sama sekali.)
+ */
+function GANTI_LINK_BULANAN() {
+  const URL_BULAN_INI = 'https://docs.google.com/spreadsheets/d/1PuWW5nHlYHkMTLz2dcW2qP9mPgLboMTrhxQAB26oEAU/edit?usp=sharing';
+  const saved = saveSpreadsheetKeduaLink(URL_BULAN_INI);
+  Logger.log('Tersimpan. Spreadsheet kedua sekarang: ID=%s', saved.id);
+}
+
+/** Jalankan ini kapan saja untuk cek link spreadsheet kedua yang SEDANG aktif dipakai. */
+function CEK_LINK_SPREADSHEET_KEDUA_SAAT_INI() {
+  Logger.log('Sedang dipakai -> %s', currentSpreadsheetKeduaUrl());
+}
+
+// ---------------------------------------------------------------------------
+// UTIL - jalankan manual dari editor untuk menguji tanpa upload lewat web
+// ---------------------------------------------------------------------------
+function TEST_withDriveFile() {
+  const FILE_ID = 'GANTI_DENGAN_FILE_ID_DI_DRIVE';
+  const file = DriveApp.getFileById(FILE_ID);
+  const base64 = Utilities.base64Encode(file.getBlob().getBytes());
+  const result = processAndMatch(base64, file.getName());
+  Logger.log(JSON.stringify(result, null, 2));
+}
+
+/**
+ * DIAGNOSTIK: jalankan ini manual dari editor Apps Script (bukan dari web app).
+ * Berguna untuk PDF/Word/gambar (apapun yang lewat jalur extractViaGoogleDocs).
+ * 1. Upload dulu file laporan ke Google Drive-mu (folder mana saja).
+ * 2. Klik kanan file itu di Drive -> "Dapatkan link" -> ambil ID-nya dari URL.
+ * 3. Ganti FILE_ID di bawah ini dengan ID tsb.
+ * 4. Jalankan fungsi ini (pilih TEST_debugExtraction di dropdown run, lalu Run).
+ * 5. Buka "Execution log" dan salin isinya kalau perlu dianalisis lebih lanjut.
+ *
+ * PATCH 10-08-2026 (f): sekarang juga mencetak hasil parseByNomorAnchor()
+ * secara terpisah dari textRecords (fallback lama), supaya gampang
+ * membandingkan mana yang lebih akurat utk file yang sedang diuji.
+ */
+function TEST_debugExtraction() {
+  const FILE_ID = 'GANTI_DENGAN_FILE_ID_DI_DRIVE';
+  const file = DriveApp.getFileById(FILE_ID);
+  const base64Data = Utilities.base64Encode(file.getBlob().getBytes());
+  const fileName = file.getName();
+  const ext = getFileExtension(fileName);
+
+  const mimeGuess = file.getBlob().getContentType() || 'application/octet-stream';
+  const isImage = /^image\//.test(mimeGuess);
+
+  const blob = Utilities.newBlob(Utilities.base64Decode(base64Data), mimeGuess, fileName);
+  const resource = { name: 'TEMP_DEBUG_APK_CHECKER_' + new Date().getTime(), mimeType: MimeType.GOOGLE_DOCS };
+  const optionalArgs = isImage ? { ocrLanguage: 'id' } : undefined;
+  const tempFile = optionalArgs ? Drive.Files.create(resource, blob, optionalArgs) : Drive.Files.create(resource, blob);
+
+  try {
+    const doc = DocumentApp.openById(tempFile.id);
+    const tables = doc.getBody().getTables();
+    const rawText = doc.getBody().getText();
+
+    Logger.log('=== JUMLAH TABEL TERDETEKSI: %s ===', tables.length);
+    tables.forEach((table, idx) => {
+      const numRows = table.getNumRows();
+      const headerCells = numRows > 0 ? table.getRow(0).getNumCells() : 0;
+      let headerTexts = [];
+      for (let c = 0; c < headerCells; c++) {
+        headerTexts.push(table.getCell(0, c).getText());
+      }
+      Logger.log('--- Tabel #%s: %s baris, header cells: %s', idx, numRows, JSON.stringify(headerTexts));
+      for (let r = 1; r <= Math.min(2, numRows - 1); r++) {
+        const rowCells = table.getRow(r).getNumCells();
+        let cellTexts = [];
+        for (let c = 0; c < rowCells; c++) cellTexts.push(table.getCell(r, c).getText());
+        Logger.log('    baris data #%s: %s', r, JSON.stringify(cellTexts));
+      }
     });
 
-    return records;
+    let tableRecords = [];
+    tables.forEach(table => { tableRecords = tableRecords.concat(parseGridRecords(gridFromDocTable(table))); });
+
+    const anchorRecords = parseByNomorAnchor(rawText);
+    const legacyTextRecords = parsePdfTextFallback(rawText);
+
+    Logger.log('=== tableRecords.length = %s ===', tableRecords.length);
+    Logger.log('=== [BARU] parseByNomorAnchor().length = %s ===', anchorRecords.length);
+    Logger.log('=== [BARU] parseByNomorAnchor() isi: %s ===', JSON.stringify(anchorRecords));
+    Logger.log('=== [LAMA] parsePdfTextFallback().length = %s ===', legacyTextRecords.length);
+    Logger.log('=== [LAMA] parsePdfTextFallback() isi: %s ===', JSON.stringify(legacyTextRecords));
+    Logger.log('=== records YANG DIPAKAI (tableRecords > anchor > legacy) = %s ===',
+      tableRecords.length > 0 ? 'tableRecords' : (anchorRecords.length > 0 ? '[BARU] anchor' : '[LAMA] legacy'));
+    Logger.log('=== PANJANG TOTAL TEKS MENTAH: %s karakter ===', rawText.length);
+    Logger.log('=== 3000 KARAKTER PERTAMA TEKS MENTAH ===');
+    Logger.log(rawText.substring(0, 3000));
+    Logger.log('=== 2000 KARAKTER TERAKHIR TEKS MENTAH ===');
+    Logger.log(rawText.substring(Math.max(0, rawText.length - 2000)));
+  } finally {
+    Drive.Files.remove(tempFile.id);
   }
-</script>
-</body>
-</html>
+}
