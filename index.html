@@ -10,12 +10,25 @@
     pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
   }
 </script>
-<!-- PATCH 10-08-2026 (c): Tesseract.js -- dipakai untuk OCR gambar (JPG/PNG/
-     dst) LANGSUNG DI BROWSER, supaya tidak lagi tergantung pada OCR Google
-     Drive di server yang terbukti sering membaca tabel per KOLOM (bukan per
-     BARIS) -- lihat catatan lengkap di dekat fungsi extractImageClientSide()
-     di bawah. -->
-<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<!-- PATCH 10-08-2026 (e): Tesseract.js (OCR gambar langsung di browser) SUDAH
+     DIHAPUS dari sini. Sempat dicoba di PATCH 10-08-2026 (c) tapi TERBUKTI
+     GAGAL TOTAL untuk gambar tabel bergaris asli (12.jpg, cabang
+     RANDUBLATUNG) -- garis tabel ikut terbaca sebagai karakter, 0 baris
+     berhasil diparse di SETIAP percobaan (baik dari data.text maupun dari
+     TSV rebuild). Karena selalu gagal untuk kasus nyata yang justru paling
+     sering muncul (gambar hasil scan/foto laporan yang bergaris tabel),
+     Tesseract cuma menambah 5-15 detik latensi tiap upload gambar SEBELUM
+     akhirnya fallback ke server -- tanpa nilai tambah apapun. Ini juga yang
+     membuat catatan di Code.gs (yang bilang OCR gambar sudah "dikembalikan
+     sepenuhnya ke server") jadi TIDAK SINKRON dengan file HTML ini, yang
+     ternyata masih menjalankan Tesseract di setiap upload gambar. Sekarang
+     keduanya sudah sinkron kembali: gambar (JPG/PNG/GIF/BMP) langsung
+     dikirim sebagai base64 ke server, di-OCR lewat Google Drive
+     (extractViaGoogleDocs() + prioritas tableRecords, lihat PATCH
+     10-08-2026 (d) di Code.gs). Kalau suatu saat mau dicoba lagi OCR
+     client-side, sebaiknya pakai library yang mendukung mode "table" /
+     pra-pemrosesan gambar (deskew, threshold, hapus garis tabel) dulu --
+     bukan Tesseract default apa adanya. -->
 <style>
   :root{
     --biru-tua:#003c71;
@@ -347,6 +360,19 @@
   // -------------------------------------------------------------------
   const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbwrUQRrQ0J3YdlxYdq3ECvg5j_Kd4erplvEIMZa6krQAyVF0p5pkVMK5LuOUoTrRLgi/exec";
 
+  // PATCH 10-08-2026 (e): batas ukuran file sebelum dikirim ke server --
+  // Apps Script/UrlFetch punya batas payload (base64 bikin ukuran naik
+  // ~33%), dan file besar juga bikin browser lama nge-encode base64-nya.
+  // Kalau tanpa guard ini, error yang muncul ke user cuma "Gagal: Failed to
+  // fetch" yang membingungkan. Dengan guard ini, pesannya jelas dari awal.
+  const MAX_FILE_SIZE_BYTES = 15 * 1024 * 1024; // 15 MB
+
+  // PATCH 10-08-2026 (e): batas waktu tunggu respons server. Tanpa ini,
+  // kalau server macet/lambat (mis. spreadsheet besar, banyak sheet),
+  // tombol "Proses & Cocokkan" bisa "menggantung" tanpa batas waktu dan user
+  // tidak tahu harus menunggu berapa lama atau coba lagi.
+  const FETCH_TIMEOUT_MS = 90 * 1000; // 90 detik
+
   const fileInput = document.getElementById('file');
   const drop = document.getElementById('drop');
   const runBtn = document.getElementById('run');
@@ -366,9 +392,35 @@
   fileInput.addEventListener('change', e => { if (e.target.files.length) setFile(e.target.files[0]); });
 
   function setFile(f) {
+    if (f.size > MAX_FILE_SIZE_BYTES) {
+      statusEl.textContent = 'File terlalu besar (' + (f.size / 1024 / 1024).toFixed(1) +
+        ' MB). Maksimal ' + (MAX_FILE_SIZE_BYTES / 1024 / 1024) + ' MB -- coba kompres/scan ulang dengan resolusi lebih rendah.';
+      filenameEl.textContent = '';
+      runBtn.disabled = true;
+      selectedFile = null;
+      return;
+    }
     selectedFile = f;
     filenameEl.textContent = f.name;
+    statusEl.textContent = '';
     runBtn.disabled = false;
+  }
+
+  // PATCH 10-08-2026 (e): fetch dengan timeout, supaya request yang macet
+  // tidak menggantung selamanya dan usernya dapat pesan yang jelas.
+  async function fetchWithTimeout(url, options, timeoutMs) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      return await fetch(url, { ...options, signal: controller.signal });
+    } catch (err) {
+      if (err.name === 'AbortError') {
+        throw new Error('Server tidak merespons dalam ' + (timeoutMs / 1000) + ' detik. Coba lagi, atau cek koneksi internet.');
+      }
+      throw err;
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   runBtn.addEventListener('click', async () => {
@@ -383,7 +435,6 @@
     try {
       const ext = (selectedFile.name.split('.').pop() || '').toLowerCase();
       let payload = null;
-      const IMAGE_EXTS = ['jpg', 'jpeg', 'png', 'gif', 'bmp'];
 
       // PATCH 10-08-2026 (a): untuk PDF, coba parse LANGSUNG DI BROWSER dulu
       // (lewat pdf.js) -- ini menghindari konversi PDF->Google Docs di
@@ -405,38 +456,14 @@
         }
       }
 
-      // PATCH 10-08-2026 (c): untuk foto/scan (JPG/PNG/dst), dulu OCR-nya
-      // SELALU lewat server (Google Drive OCR -> konversi ke Google Doc ->
-      // parsePdfTextFallback() di Apps Script). Masalahnya, terbukti dari
-      // kasus nyata: OCR Google Drive untuk gambar TABEL sering membaca
-      // teks per KOLOM (semua isi kolom "Nama" berurutan, baru semua isi
-      // kolom "Pokok", baru "Basil", dst), bukan per BARIS seperti
-      // manusia baca tabel. Begitu ada satu baris yang salah satu kolom
-      // angkanya KOSONG (mis. Pokok kosong), seluruh pasangan nama<->angka
-      // di bawahnya ikut geser dan salah tempel -- akibatnya nama tetap
-      // "ketemu" (match by name, kuning) tapi Pokok/Basil-nya nyaris
-      // selalu kosong/tidak nyambung sama sekali. Sekarang gambar dicoba
-      // di-OCR LANGSUNG DI BROWSER dulu lewat Tesseract.js (lihat
-      // extractImageClientSide() di bawah), yang memberi posisi (x,y)
-      // tiap kata sehingga baris bisa disusun ulang berdasarkan koordinat
-      // -- sama seperti pendekatan PDF di atas, BUKAN mengandalkan urutan
-      // baca OCR Drive. Hasil parse (nama+angka) itulah yang dikirim ke
-      // server. Kalau OCR di browser gagal / 0 baris terbaca (mis. foto
-      // terlalu buram, atau library gagal dimuat) -> otomatis fallback ke
-      // cara lama (upload gambar ke server, server yang OCR lewat Google
-      // Drive), supaya tetap ada hasil.
-      if (!payload && IMAGE_EXTS.includes(ext) && window.Tesseract) {
-        try {
-          const { rawText, records } = await extractImageClientSide(selectedFile, p => {
-            statusEl.textContent = 'Membaca gambar (OCR) di browser... ' + Math.round(p * 100) + '%';
-          });
-          if (records.length > 0) {
-            payload = { fileName: selectedFile.name, clientRecords: records, rawText: rawText };
-          }
-        } catch (imgErr) {
-          console.warn('OCR gambar di browser gagal, fallback ke server:', imgErr);
-        }
-      }
+      // PATCH 10-08-2026 (e): foto/scan (JPG/PNG/GIF/BMP) SELALU dikirim ke
+      // server sebagai base64 -- OCR-nya dilakukan di sana lewat Google
+      // Drive (extractViaGoogleDocs(), yang sejak PATCH 10-08-2026 (d) di
+      // Code.gs sudah memprioritaskan tableRecords/tabel asli yang
+      // terdeteksi Google, jauh lebih akurat daripada tebak-tebakan teks
+      // lepas). Percobaan OCR client-side lewat Tesseract.js (PATCH
+      // 10-08-2026 c) SUDAH DIHAPUS dari file ini -- lihat catatan panjang
+      // di dekat tag <script> Tesseract yang (sudah tidak ada) di <head>.
 
       if (!payload) {
         statusEl.textContent = 'Membaca file...';
@@ -446,12 +473,22 @@
 
       statusEl.textContent = 'Mengirim ke server & mencocokkan spreadsheet...';
 
-      const res = await fetch(WEB_APP_URL, {
+      const res = await fetchWithTimeout(WEB_APP_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // hindari CORS preflight
         body: JSON.stringify(payload)
-      });
-      const data = await res.json();
+      }, FETCH_TIMEOUT_MS);
+
+      if (!res.ok) {
+        throw new Error('Server merespons dengan status ' + res.status + ' (' + res.statusText + ').');
+      }
+
+      let data;
+      try {
+        data = await res.json();
+      } catch (parseErr) {
+        throw new Error('Respons server tidak valid (bukan JSON). Cek apakah web app Apps Script masih ter-deploy dengan benar.');
+      }
 
       if (!data.ok) throw new Error(data.error || 'Gagal memproses di server.');
       renderResult(data);
@@ -466,7 +503,7 @@
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => resolve(reader.result.split(',')[1]);
-      reader.onerror = reject;
+      reader.onerror = () => reject(new Error('Gagal membaca file dari disk.'));
       reader.readAsDataURL(file);
     });
   }
@@ -478,15 +515,15 @@
   }
 
   function renderResult(data) {
-    const s = data.summary;
+    const s = data.summary || {};
     let text = 'Selesai.\n' +
-      'Baris terbaca dari file: ' + s.pdfRowsRead + '\n' +
-      'Baris cocok di (Checker Nisbah): ' + s.mainSheetMatched + '\n' +
-      'Baris cocok di (Potensi Nisbah): ' + s.secondSheetMatched;
+      'Baris terbaca dari file: ' + (s.pdfRowsRead != null ? s.pdfRowsRead : '-') + '\n' +
+      'Baris cocok di (Checker Nisbah): ' + (s.mainSheetMatched != null ? s.mainSheetMatched : '-') + '\n' +
+      'Baris cocok di (Potensi Nisbah): ' + (s.secondSheetMatched != null ? s.secondSheetMatched : '-');
 
     // Ambil daftar sheet
     let sheets = s.mainSheets || s.processedSheets || [];
-    
+
     // FILTER: Hanya ambil sheet pertama (karena sheet pertama milik Link Checker Nisbah)
     if (sheets && sheets.length > 0) {
       text += '\nSheet yang diproses: ' + sheets[0];
@@ -550,11 +587,11 @@
   });
 
   async function callWebApp(payload) {
-    const res = await fetch(WEB_APP_URL, {
+    const res = await fetchWithTimeout(WEB_APP_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // hindari CORS preflight
       body: JSON.stringify(payload)
-    });
+    }, FETCH_TIMEOUT_MS);
     return res.json();
   }
 
@@ -842,9 +879,7 @@
    * extractPdfClientSide di atas). Formatnya konsisten:
    *   No Nomor Tanggal Nama [Pokok] Basil [Kifarat] [Ppj] [Ke] [Pembiayaan]
    * Karena urutannya sudah benar, cukup regex per baris -- tidak perlu
-   * algoritma eliminasi seperti fallback server. Juga dipakai kembali oleh
-   * extractImageClientSide() di bawah (baris hasil OCR yang sudah disusun
-   * ulang berdasarkan koordinat kata memiliki format yang sama persis).
+   * algoritma eliminasi seperti fallback server.
    */
   function parsePdfRowsClient(rawText) {
     const lines = rawText.split(/\n+/).map(l => l.trim()).filter(Boolean);
@@ -871,117 +906,6 @@
     });
 
     return records;
-  }
-
-  // ============================================================
-  // PATCH 10-08-2026 (c): OCR gambar (JPG/PNG/dst) LANGSUNG DI BROWSER
-  // lewat Tesseract.js, supaya tidak lagi bergantung pada OCR Google
-  // Drive di server -- yang terbukti (dari kasus nyata: laporan cabang
-  // RANDUBLATUNG, file 12.jpg) sering membaca tabel per KOLOM alih-alih
-  // per BARIS, sehingga Nama tetap "ketemu" tapi Pokok/Basil-nya nyaris
-  // selalu kosong / salah pasang begitu ada satu baris yang salah satu
-  // kolom angkanya kosong (mis. Pokok kosong utk baris MULYONO/NYAMAN).
-  //
-  // Strategi sama seperti extractPdfClientSide() di atas: dapatkan posisi
-  // (x,y) tiap KATA hasil OCR, susun ulang jadi baris berdasarkan
-  // baris/blok yang terdeteksi Tesseract (line_num), urutkan kata dalam
-  // satu baris berdasarkan X (kiri ke kanan) -- baru diparse dengan
-  // parser SAMA PERSIS dengan PDF (parsePdfRowsClient), karena formatnya
-  // memang sama ("No Nomor Tanggal Nama Pokok Basil ..."). Ini menghindari
-  // ketergantungan pada urutan baca OCR Drive yang tidak bisa diandalkan.
-  //
-  // Tesseract.js secara default sudah menyusun data.text per baris
-  // berdasarkan analisa layout-nya sendiri -- itu dicoba DULU (paling
-  // cepat). Kalau dari situ tidak dapat baris yang valid (regex "No
-  // Nomor Tanggal ..." tidak match sama sekali, tanda urutan baca masih
-  // kacau), baru disusun ulang manual dari data TSV (yang berisi posisi
-  // x/y & pengelompokan baris per kata) sebagai upaya kedua.
-  //
-  // Kalau OCR di browser gagal total (library gagal dimuat, gambar
-  // terlalu buram, dsb) -> otomatis FALLBACK ke jalur lama (upload gambar
-  // ke server, server yang OCR lewat Google Drive), supaya tetap ada
-  // hasil -- lihat pemanggilnya di runBtn click handler di atas.
-  //
-  // @param {File} file
-  // @param {function(number)} [onProgress] - dipanggil berkala dgn progress 0..1
-  // ============================================================
-  async function extractImageClientSide(file, onProgress) {
-    const worker = await Tesseract.createWorker('ind', 1, {
-      logger: m => {
-        if (onProgress && m.status === 'recognizing text' && typeof m.progress === 'number') {
-          onProgress(m.progress);
-        }
-      }
-    });
-    try {
-      const { data } = await worker.recognize(file, {}, { text: true, tsv: true });
-
-      // DEBUG (sementara): supaya bisa didiagnosis dari DevTools Console
-      // browser (F12 -> tab Console) kalau hasil pencocokan masih meleset.
-      // Tidak mempengaruhi pemrosesan, cuma mencetak ke console.
-      console.log('=== [DEBUG OCR] data.text (mentah dari Tesseract) ===');
-      console.log(data.text);
-      if (data.tsv) {
-        console.log('=== [DEBUG OCR] rebuildLinesFromTsv() ===');
-        console.log(rebuildLinesFromTsv(data.tsv));
-      }
-
-      // Upaya pertama: pakai teks hasil layout analysis Tesseract sendiri.
-      const rawTextDefault = data.text || '';
-      let records = parsePdfRowsClient(rawTextDefault);
-      console.log('=== [DEBUG OCR] records dari data.text ===', records);
-      if (records.length > 0) {
-        return { rawText: rawTextDefault, records };
-      }
-
-      // Upaya kedua: susun ulang baris manual dari TSV (posisi x per kata,
-      // dikelompokkan per baris/blok yang terdeteksi Tesseract) -- untuk
-      // jaga-jaga kalau urutan baca default masih kurang tepat.
-      if (data.tsv) {
-        const rawTextRebuilt = rebuildLinesFromTsv(data.tsv);
-        records = parsePdfRowsClient(rawTextRebuilt);
-        console.log('=== [DEBUG OCR] records dari TSV rebuild ===', records);
-        if (records.length > 0) {
-          return { rawText: rawTextRebuilt, records };
-        }
-        return { rawText: rawTextRebuilt || rawTextDefault, records: [] };
-      }
-
-      return { rawText: rawTextDefault, records: [] };
-    } finally {
-      await worker.terminate();
-    }
-  }
-
-  /**
-   * Susun ulang baris teks dari output TSV Tesseract (format standar:
-   * level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\t
-   * width\theight\tconf\ttext). Kata-kata dikelompokkan berdasarkan baris
-   * yang sama (page-block-par-line) menurut deteksi Tesseract sendiri,
-   * lalu diurutkan kiri->kanan berdasarkan posisi "left" (x) sebelum
-   * digabung jadi satu baris teks -- supaya urutannya presisi walau
-   * urutan kemunculan mentah di TSV tidak selalu rapi.
-   */
-  function rebuildLinesFromTsv(tsv) {
-    const rows = tsv.split('\n').map(l => l.split('\t'));
-    const groups = {};
-    const order = [];
-
-    rows.forEach(cols => {
-      if (cols.length < 12 || cols[0] !== '5') return; // level 5 = kata (word)
-      const conf = parseFloat(cols[10]);
-      const text = cols.slice(11).join('\t').trim();
-      if (!text || isNaN(conf) || conf < 0) return;
-
-      const key = cols[1] + '-' + cols[2] + '-' + cols[3] + '-' + cols[4]; // page-block-par-line
-      if (!groups[key]) { groups[key] = []; order.push(key); }
-      groups[key].push({ left: parseInt(cols[6], 10) || 0, text: text });
-    });
-
-    return order
-      .map(key => groups[key].slice().sort((a, b) => a.left - b.left).map(w => w.text).join(' '))
-      .filter(Boolean)
-      .join('\n');
   }
 </script>
 </body>
