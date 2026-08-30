@@ -719,8 +719,10 @@
 
   // Rate harian tetap (hasil analisa: Nisbah 31-harian ÷ 31), dipakai untuk menghitung
   // Nisbah % bulan berjalan = rate harian × jumlah hari bulan yang dipilih.
+  // REG: dikalibrasi ulang 29-08-2026 dari data tagihan resmi (Saldo 547.997.475 x 31
+  // hari = Rp 6.626.194), supaya mode Otomatis (31 hari) langsung cocok dengan tagihan asli.
   const AKP_DAILY_RATE = {
-    REG: 0.04184479457531179,
+    REG: 0.03900532453153859,
     PEN: 0.023671232679383217,
     UNIK: 0.0190684915835492
   };
