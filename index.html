@@ -717,12 +717,15 @@
 
   const akpBodyEl = document.getElementById('akpBody');
 
-  // Rate harian tetap (hasil analisa: Nisbah 31-harian ÷ 31), dipakai untuk menghitung
-  // Nisbah % bulan berjalan = rate harian × jumlah hari bulan yang dipilih.
-  // REG: dikalibrasi ulang 29-08-2026 dari data tagihan resmi (Saldo 547.997.475 x 31
-  // hari = Rp 6.626.194), supaya mode Otomatis (31 hari) langsung cocok dengan tagihan asli.
+  // Rate harian TETAP untuk semua bulan (Agustus s/d Desember dst): hanya Saldo dan
+  // jumlah hari yang berubah. Nisbah % bulan berjalan = rate harian x jumlah hari.
+  // Satuan rate = PERSEN per hari.
+  // REG dikalibrasi ulang 30-09-2026 dari tagihan resmi September 2026:
+  //   Saldo 154.464.087 x 30 hari = Rp 4.019.750
+  //   rate = 4.019.750 / (154.464.087 x 30) x 100 = 0,0867461617 % per hari
+  // Cek September: REG 4.019.750 + PEN 25.364.439 + UNIK 9.658.720 = 39.042.909.
   const AKP_DAILY_RATE = {
-    REG: 0.03900532453153859,
+    REG: 0.0867461617,
     PEN: 0.023671232679383217,
     UNIK: 0.0190684915835492
   };
@@ -765,21 +768,26 @@
     if (hapusBtn) hapusBtn.addEventListener('click', () => tr.remove());
   }
 
-  // Hitung ulang Nisbah % baris terkunci (REG/PEN/UNIK) = rate harian × jumlah hari
+  // Hitung ulang Nisbah % baris terkunci (REG/PEN/UNIK) = rate harian x jumlah hari
   // bulan yang sedang dipilih, supaya Total AKP ikut berubah sesuai jumlah hari.
+  // Nilai presisi penuh disimpan di dataset.exact (dipakai untuk hitungan), sedangkan
+  // el.value hanya tampilan yang dibulatkan -- supaya tidak ada selisih rupiah
+  // akibat pembulatan Nisbah %.
   function refreshLockedNisbah() {
     const hari = parseInt(akpJmlHariEl.textContent, 10) || 0;
     document.querySelectorAll('.akp-bunga.akp-locked[data-cat]').forEach(el => {
       const cat = el.getAttribute('data-cat');
       const dailyRate = AKP_DAILY_RATE[cat];
       if (dailyRate === undefined) return;
-      el.value = (dailyRate * hari).toFixed(5);
+      const exact = dailyRate * hari;
+      el.dataset.exact = exact;      // dipakai untuk hitungan
+      el.value = exact.toFixed(5);   // hanya tampilan
     });
   }
 
   // Baris default mengikuti kategori & rate bulan berjalan (REG/PEN/UNIK).
   // Kategori dan Nisbah % dipatenkan (readonly, tidak bisa diedit). Nisbah % dihitung
-  // otomatis = rate harian × jumlah hari bulan yang dipilih, sehingga Total AKP ikut
+  // otomatis = rate harian x jumlah hari bulan yang dipilih, sehingga Total AKP ikut
   // berubah kalau bulan/tahun (jumlah hari) diganti. Hanya kolom Saldo yang bisa diisi
   // manual. Kategori UMI dihapus permanen.
   addAkpRow('REG', 0, 0, true, 'REG');
@@ -795,9 +803,12 @@
     rows.forEach(tr => {
       const saldoRaw = tr.querySelector('.akp-saldo').value.replace(/[^\d]/g, '');
       const saldo = parseFloat(saldoRaw) || 0;
-      const bunga = parseFloat(tr.querySelector('.akp-bunga').value) || 0;
+      const bungaEl = tr.querySelector('.akp-bunga');
+      const bunga = bungaEl.dataset.exact !== undefined
+        ? parseFloat(bungaEl.dataset.exact)
+        : (parseFloat(bungaEl.value) || 0);
       const hasil = saldo * (bunga / 100);
-      total += hasil;
+      total += Math.round(hasil);
       tr.querySelector('.akp-hasil').textContent = formatAngkaID(hasil);
     });
     document.getElementById('akpTotalValue').textContent = formatAngkaID(total);
